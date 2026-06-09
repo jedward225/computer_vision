@@ -1,9 +1,9 @@
-reference/
-assignment2.pdf
+/reference/
+/assignment2.pdf
 
 # Local datasets and large medical volumes
-data/
-datasets/
+/data/
+/datasets/
 *.nii
 *.nii.gz
 *.dcm

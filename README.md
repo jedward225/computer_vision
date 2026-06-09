@@ -38,7 +38,8 @@ The KiTS23 dataset is not committed. A typical local layout is:
 ```text
 data/
   kits23/
-    dataset/
+    kits23_repo/
+      dataset/
       case_00000/
         imaging.nii.gz
         segmentation.nii.gz
@@ -62,9 +63,9 @@ The final experiments use the downloaded KiTS23 cases with train/val/test split 
 bash scripts/setup_env.sh
 conda activate cv-final
 
-# Preprocess KiTS23 volumes into 2D/2.5D slices
+# Preprocess 100 KiTS23 volumes into 2D/2.5D slices
 bash scripts/download_kits23.sh --num-cases 100
-bash scripts/prepare_data.sh
+bash scripts/prepare_data.sh --max-cases 100
 
 # Train baselines
 bash scripts/train_unet.sh

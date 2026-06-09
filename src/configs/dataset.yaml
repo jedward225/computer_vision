@@ -1,5 +1,5 @@
 seed: 2026
-data_root: data/kits23/dataset
+data_root: data/kits23/kits23_repo/dataset
 processed_root: data/processed/kits23_slices
 image_size: 256
 classes:

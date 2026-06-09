@@ -34,14 +34,14 @@ bash scripts/download_kits23.sh --num-cases 100
 The expected layout after download is:
 
 ```text
-data/kits23/dataset/case_00000/imaging.nii.gz
-data/kits23/dataset/case_00000/segmentation.nii.gz
+data/kits23/kits23_repo/dataset/case_00000/imaging.nii.gz
+data/kits23/kits23_repo/dataset/case_00000/segmentation.nii.gz
 ```
 
 ## First Pipeline Run
 
 ```bash
-bash scripts/prepare_data.sh
+bash scripts/prepare_data.sh --max-cases 100
 bash scripts/train_unet.sh
 bash scripts/evaluate_all.sh
 ```
