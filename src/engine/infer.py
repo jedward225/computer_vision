@@ -79,7 +79,7 @@ def main() -> None:
             mask_np = mask[i].detach().cpu().numpy()
             pred_np = pred[i].detach().cpu().numpy()
             case_id = batch["case_id"][i]
-            slice_idx = int(batch["slice_index"][i])
+            slice_idx = int(batch["slice_idx"][i])
             name = f"{saved:03d}_{case_id}_z{slice_idx:04d}"
             save_panel(
                 output_dir / f"{name}.png",

@@ -47,11 +47,15 @@ data/
         segmentation.nii.gz
 ```
 
-Download with the official package:
+Download a bounded KiTS23 subset:
 
 ```bash
 bash scripts/download_kits23.sh --num-cases 100
 ```
+
+The repository downloader fetches selected `imaging.nii.gz` and `segmentation.nii.gz`
+pairs into the expected `data/kits23/dataset/case_xxxxx/` layout. It intentionally
+requires `--num-cases` or `--case` to avoid accidentally downloading the full dataset.
 
 The final experiments use the downloaded KiTS23 cases with train/val/test split by patient ID.
 
@@ -70,18 +74,48 @@ bash scripts/prepare_data.sh
 bash scripts/train_unet.sh
 bash scripts/train_segresnet.sh
 
+# Formal binary KiTS23 run used in the current analysis
+python -m src.engine.train_baseline \
+  --config src/configs/unet_binary_100case.yaml \
+  --data-config src/configs/dataset.yaml \
+  --binary
+
 # Train generative models
 bash scripts/train_cvae.sh
 bash scripts/train_diffusion.sh
 bash scripts/train_diffusion_25d.sh
 
+python -m src.engine.train_diffusion \
+  --config src/configs/diffusion_binary_100case.yaml \
+  --data-config src/configs/dataset.yaml \
+  --binary
+
 # Evaluate and generate report figures
 bash scripts/evaluate_all.sh
 bash scripts/infer_diffusion.sh
 bash scripts/make_figures.sh
+
+python -m src.engine.evaluate \
+  --configs src/configs/unet_binary_100case.yaml src/configs/diffusion_binary_100case.yaml \
+  --data-config src/configs/dataset.yaml \
+  --binary \
+  --output results/tables/binary_100case_evaluation.csv
 ```
 
 The scripts run preprocessing, training, evaluation, and report-figure generation once the environment and data are available.
+
+## Current 100-Case Binary Result
+
+The current formal run uses 100 KiTS23 cases split by patient ID into 70 train, 15 validation, and 15 test cases. Labels are simplified to binary foreground segmentation, which is allowed by the assignment.
+
+| Model | Sampling steps | Test Dice | Test IoU | ms / image |
+| --- | ---: | ---: | ---: | ---: |
+| U-Net | 1 | 0.8877 | 0.7981 | 0.87 |
+| Conditional diffusion | 5 | 0.1682 | 0.0918 | 16.88 |
+| Conditional diffusion | 10 | 0.1683 | 0.0919 | 33.63 |
+| Conditional diffusion | 25 | 0.1689 | 0.0922 | 84.08 |
+
+See `docs/experiment_analysis.md` for interpretation and report-ready conclusions.
 
 For tmux-friendly commands, see `scripts/tmux_commands.md`.
 

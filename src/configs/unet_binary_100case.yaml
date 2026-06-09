@@ -1,0 +1,17 @@
+experiment_name: unet_binary_100case
+model:
+  name: unet_2d
+  in_channels: 1
+  out_channels: 2
+  channels: [32, 64, 128, 256]
+training:
+  epochs: 25
+  batch_size: 48
+  eval_batch_size: 96
+  num_workers: 4
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  amp: true
+evaluation:
+  metrics: [dice, iou]
+
