@@ -1,0 +1,10 @@
+experiment_name: diffusion_25d_multiclass
+inherits: diffusion_2d.yaml
+model:
+  image_channels: 3
+  mask_channels: 4
+  out_channels: 4
+data:
+  input_mode: 2.5d
+  neighbor_slices: 1
+

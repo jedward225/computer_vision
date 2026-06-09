@@ -1,0 +1,22 @@
+seed: 2026
+data_root: data/kits23/dataset
+processed_root: data/processed/kits23_slices
+image_size: 256
+classes:
+  background: 0
+  kidney: 1
+  tumor: 2
+  cyst: 3
+split:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+preprocess:
+  axis: axial
+  hu_window:
+    center: 40
+    width: 400
+  keep_slices:
+    mode: foreground_or_context
+    context_margin: 3
+    empty_stride: 10

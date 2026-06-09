@@ -1,0 +1,29 @@
+name: cv-final
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1
+  - sympy=1.13.1
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - scikit-image
+  - scikit-learn
+  - pyyaml
+  - tqdm
+  - pip:
+      - nibabel
+      - SimpleITK
+      - git+https://github.com/neheller/kits23.git
+      - opencv-python
+      - seaborn
+      - einops
+      - tensorboard
+      - huggingface-hub

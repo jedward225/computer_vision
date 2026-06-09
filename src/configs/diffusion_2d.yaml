@@ -1,0 +1,30 @@
+experiment_name: diffusion_2d_multiclass
+model:
+  name: conditional_diffusion_unet
+  image_channels: 1
+  mask_channels: 4
+  out_channels: 4
+  base_channels: 64
+  channel_mult: [1, 2, 4, 8]
+  attention_resolutions: [16, 32]
+diffusion:
+  train_steps: 1000
+  beta_schedule: cosine
+  prediction_type: epsilon
+  sampler: ddim
+  sample_steps: [5, 10, 25, 50, 100]
+training:
+  epochs: 150
+  batch_size: 24
+  eval_batch_size: 16
+  num_workers: 4
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  loss:
+    noise_mse_weight: 1.0
+    dice_ce_weight: 0.2
+  amp: true
+evaluation:
+  metrics: [dice, iou]
+  uncertainty_samples: 8
+  validation_sample_steps: 25

@@ -1,0 +1,19 @@
+experiment_name: cvae_2d_multiclass
+model:
+  name: conditional_vae_seg
+  in_channels: 1
+  out_channels: 4
+  latent_dim: 64
+  encoder_channels: [32, 64, 128, 256]
+training:
+  epochs: 100
+  batch_size: 32
+  eval_batch_size: 32
+  num_workers: 4
+  learning_rate: 0.0002
+  beta_kl: 0.001
+  loss: dice_ce_plus_kl
+  amp: true
+evaluation:
+  metrics: [dice, iou]
+  samples_per_image: 4

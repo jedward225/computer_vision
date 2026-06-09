@@ -1,1 +1,43 @@
 reference/
+assignment2.pdf
+
+# Local datasets and large medical volumes
+data/
+datasets/
+*.nii
+*.nii.gz
+*.dcm
+
+# Training artifacts
+checkpoints/*
+!checkpoints/.gitkeep
+logs/*
+!logs/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Generated build products
+report.pdf
+slides.pdf
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.log
+*.out
+*.run.xml
+*.synctex.gz
