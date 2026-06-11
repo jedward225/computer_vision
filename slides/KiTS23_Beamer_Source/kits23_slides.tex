@@ -1,4 +1,4 @@
-﻿\documentclass[10pt]{beamer}
+\documentclass[10pt]{beamer}
 \usepackage{ctex,hyperref}
 \usepackage{amsmath,amssymb,booktabs,graphicx,xcolor,multicol,tabularx,array}
 \usepackage{tikz}
@@ -55,44 +55,41 @@
   \tableofcontents[sectionstyle=show,subsectionstyle=show/shaded/hide]
 \end{frame}
 
-\section{任务背景与实验设置}
+\section{任务背景}
 
-\begin{frame}{任务定义：KiTS23 二值前景分割}
+\begin{frame}{任务定义：KiTS23 4 类语义分割}
   \begin{columns}[T]
-    \column{0.53\textwidth}
-      \begin{block}{任务形式}
+    \column{0.54\textwidth}
+      \begin{block}{输入与输出}
         \footnotesize
-        给定腹部 CT 轴向切片 $x\in\mathbb{R}^{1\times256\times256}$，预测二值分割掩码：
+        给定腹部 CT axial slice $x\in\mathbb{R}^{1\times256\times256}$，预测逐像素类别：
         \[
-          y_i \in \{0,1\},\qquad
-          1=\text{kidney/tumor/cyst foreground}.
+          y_i\in\{0,1,2,3\}
+          =\{\text{background},\text{kidney},\text{tumor},\text{cyst}\}.
         \]
-        本版代码将 KiTS23 的 4 类标签合并为前景/背景，符合课程任务允许的 binary segmentation 设定。
+        本项目报告 kidney、tumor、cyst 三个前景类别的 Dice / IoU，并计算前景 Mean Dice。
       \end{block}
-      \begin{alertblock}{核心问题}
+      \begin{alertblock}{难点}
         \footnotesize
-        前景区域稀疏，肿瘤和囊肿面积小；判别式模型直接学习 $x\mapsto y$，生成式模型需要学习掩码分布或从噪声恢复掩码。
+        kidney 区域较稳定，tumor/cyst 目标小、类别不均衡强；2D 切片缺少跨层连续性，小病灶最容易漏检。
       \end{alertblock}
 
-    \column{0.43\textwidth}
+    \column{0.42\textwidth}
       \begin{block}{数据划分}
         \centering\footnotesize
-        \begin{tabular}{lrr}
+        \begin{tabular}{lrrr}
           \toprule
-          Split & Cases & Slices \\
+          Split & Cases & Slices & FG Slices \\
           \midrule
-          Train & 70 & 17,047 \\
-          Val   & 15 & 3,521  \\
-          Test  & 15 & 3,755  \\
+          Train & 70 & 6950 & 5585 \\
+          Val   & 15 & 1624 & 1323 \\
+          Test  & 15 & 1151 & 901 \\
           \bottomrule
         \end{tabular}
       \end{block}
-      \begin{exampleblock}{评估指标}
+      \begin{exampleblock}{CT 预处理}
         \footnotesize
-        \[
-          \mathrm{Dice}=\frac{2|P\cap G|}{|P|+|G|},\qquad
-          \mathrm{IoU}=\frac{|P\cap G|}{|P\cup G|}.
-        \]
+        HU window: $c=40,w=400$；线性归一化到 $[0,1]$；resize 到 $256\times256$；按 patient-level split 防止数据泄漏。
       \end{exampleblock}
   \end{columns}
 \end{frame}
@@ -100,530 +97,435 @@
 \begin{frame}{预处理与训练约束}
   \begin{columns}[T]
     \column{0.50\textwidth}
-      \begin{block}{CT 预处理}
+      \begin{block}{数据预处理}
         \footnotesize
-        对每个 3D volume 切为 2D axial slices，使用腹部 CT 常用窗口：
-        \[
-          I_\mathrm{clip}=\mathrm{clip}\left(I,c-\frac{w}{2},c+\frac{w}{2}\right),
-          \quad c=40,\ w=400.
-        \]
-        再线性归一化到 $[0,1]$ 并 resize 到 $256\times256$。
-      \end{block}
-      \begin{block}{训练硬件}
-        \footnotesize
-        最新实验运行在 NVIDIA RTX PRO 6000 Blackwell Server Edition GPU 上；正式报告使用 100-case KiTS23 子集。
+        \begin{itemize}
+          \item 从 NIfTI affine 推断 axial 轴，避免把 sagittal/coronal 切片误当 axial。
+          \item CT 强度使用腹部窗口 $c=40,w=400$，再归一化到 $[0,1]$。
+          \item 将切片 resize 到 $256\times256$，标签保留 4 类互斥类别。
+          \item 使用 patient-level split，防止同一病例切片同时进入训练和测试集。
+        \end{itemize}
       \end{block}
     \column{0.46\textwidth}
-      \begin{block}{最新代码中的模型}
-        \footnotesize
-        \begin{tabular}{ll}
+      \begin{block}{训练设置}
+        \centering\tiny
+        \setlength{\tabcolsep}{2.2pt}
+        \begin{tabular}{@{}lccc@{}}
           \toprule
-          类型 & 实现 \\
+          Model & Ep. & BS & LR \\
           \midrule
-          判别式 & \model{U-Net}, \model{SegResNet} \\
-          生成式 & \model{Conditional VAE}, \model{Conditional Diffusion} \\
-          采样器 & DDIM sampler \\
+          U-Net/SegResNet & 100 & 32 & $2e{-4}$ \\
+          cVAE & 100 & 32 & $2e{-4}$ \\
+          x0 Diffusion & 80 & 16 & $1e{-4}$ \\
           \bottomrule
         \end{tabular}
       \end{block}
-      \begin{exampleblock}{正式量化结果}
+      \begin{alertblock}{统一约束}
         \footnotesize
-        当前正式 evaluation CSV 记录了 binary \model{U-Net} 和 conditional diffusion。SegResNet/cVAE 作为代码实现和方法讨论保留。
+        模型选择依据 validation Mean Dice；diffusion 验证使用 5-step DDIM；最终测试统一在 axial test split 上评估。
+      \end{alertblock}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{项目目标：判别式基线与条件生成式分割}
+  \begin{columns}[T]
+    \column{0.47\textwidth}
+      \begin{exampleblock}{判别式 baseline}
+        \footnotesize
+        直接学习映射
+        \begin{align*}
+          \hat{y} &= f_\theta(x),\\
+          p_\theta(y_i=c\mid x)
+          &= \mathrm{softmax}(f_\theta(x)_i)_c .
+        \end{align*}
+        优点是目标直接、推理快、医学分割中很稳定。我们训练 U-Net、SegResNet 和 2.5D U-Net 作为对照。
       \end{exampleblock}
+    \column{0.49\textwidth}
+      \begin{alertblock}{生成式方案}
+        \footnotesize
+        将 mask 当作生成目标，学习条件分布
+        \[
+          p_\theta(y\mid x).
+        \]
+        生成式部分实现 conditional VAE 与 conditional diffusion：它们不只给出单个 mask，还可以展示生成轨迹和不确定性。
+      \end{alertblock}
+  \end{columns}
+  \begin{block}{本项目核心问题}
+    \footnotesize
+    生成式模型能否完成医学分割？相比判别式模型，它的精度、速度、采样步数和不确定性表达分别如何？
+  \end{block}
+\end{frame}
+
+\begin{frame}{实验方案概览}
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+      \begin{block}{判别式模型}
+        \footnotesize
+        \begin{itemize}
+          \item \model{U-Net}: encoder-decoder + skip connection
+          \item \model{SegResNet}: residual blocks for segmentation
+          \item \model{2.5D U-Net}: 相邻切片作为 3 通道输入
+        \end{itemize}
+      \end{block}
+      \sourcefoot{主要代码：\codepath{src/models/unet_baseline.py}, \codepath{src/models/segresnet_baseline.py}}
+    \column{0.48\textwidth}
+      \begin{block}{生成式模型}
+        \footnotesize
+        \begin{itemize}
+          \item \model{Conditional VAE}: $z$ 表示掩码生成的不确定性
+          \item \model{x0 Diffusion}: 从 noisy mask 逐步生成 clean mask
+          \item DDIM sampling: 比较 1/5/10/25 步
+        \end{itemize}
+      \end{block}
+      \sourcefoot{主要代码：\codepath{src/models/cvae_seg.py}, \codepath{src/models/diffusion_unet.py}, \codepath{src/diffusion/scheduler.py}}
   \end{columns}
 \end{frame}
 
 \section{判别式模型}
 
-\begin{frame}{判别式模型：整体思路}
-  \begin{block}{直接学习条件分布}
-    \footnotesize
-    判别式分割把问题写成逐像素分类：
-    \[
-      \hat{y}=\arg\max_c p_\theta(y_i=c\mid x),
-      \qquad
-      p_\theta(y_i=c\mid x)=\mathrm{softmax}(f_\theta(x)_i)_c.
-    \]
-    网络只需要给定 CT 图像后输出掩码，不需要显式模拟掩码生成过程。
-  \end{block}
-  \begin{columns}[T]
-    \column{0.48\textwidth}
-      \begin{exampleblock}{优势}
-        \footnotesize
-        训练目标直接对齐 Dice/CE；推理只需一次前向传播；对医学图像分割的稀疏前景更稳定。
-      \end{exampleblock}
-    \column{0.48\textwidth}
-      \begin{alertblock}{限制}
-        \footnotesize
-        输出通常是单一确定结果；不显式建模掩码分布，也不天然给出多样性和去噪轨迹。
-      \end{alertblock}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{判别式原理：U-Net}
-  \begin{columns}[T]
-    \column{0.50\textwidth}
-      \begin{block}{Encoder--Decoder + Skip Connection}
-        \footnotesize
-        \model{U-Net} 先用下采样提取语义，再用上采样恢复空间分辨率。第 $l$ 层 skip connection 将局部边界信息送回解码器：
-        \[
-          h_l^\downarrow = E_l(h_{l-1}),\qquad
-          h_l^\uparrow = D_l([\,U(h_{l+1}^\uparrow), h_l^\downarrow\,]).
-        \]
-        最后一层 $1\times1$ convolution 输出每个像素的 foreground/background logits。
-      \end{block}
-      \begin{exampleblock}{本项目实现}
-        \footnotesize
-        \codepath{src/models/unet_baseline.py}\\
-        channels: $[32,64,128,256]$，loss 使用 DiceCE。
-      \end{exampleblock}
-    \column{0.46\textwidth}
-      \centering
-      \begin{tikzpicture}[node distance=0.55cm, font=\scriptsize]
-        \tikzstyle{box}=[draw=ruc, fill=ruc!8, rounded corners=2pt, minimum width=1.3cm, minimum height=0.55cm]
-        \node[box] (e1) {Enc 32};
-        \node[box, below=of e1] (e2) {Enc 64};
-        \node[box, below=of e2] (e3) {Enc 128};
-        \node[box, below=of e3] (b) {Bottleneck};
-        \node[box, right=2.5cm of e3] (d3) {Dec 128};
-        \node[box, above=of d3] (d2) {Dec 64};
-        \node[box, above=of d2] (d1) {Dec 32};
-        \node[box, above=of d1] (out) {Mask logits};
-        \draw[->, thick] (e1)--(e2);
-        \draw[->, thick] (e2)--(e3);
-        \draw[->, thick] (e3)--(b);
-        \draw[->, thick] (b.east)--(d3.south west);
-        \draw[->, thick] (d3)--(d2);
-        \draw[->, thick] (d2)--(d1);
-        \draw[->, thick] (d1)--(out);
-        \draw[->, dashed, thick, deepgreen] (e3)--(d3);
-        \draw[->, dashed, thick, deepgreen] (e2)--(d2);
-        \draw[->, dashed, thick, deepgreen] (e1)--(d1);
-      \end{tikzpicture}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{判别式原理：SegResNet}
+\begin{frame}{判别式模型：方法方案与结果}
   \begin{columns}[T]
     \column{0.52\textwidth}
-      \begin{block}{Residual Segmentation Network}
+      \begin{block}{U-Net / SegResNet}
         \footnotesize
-        \model{SegResNet} 保留 U-Net 的多尺度结构，但基本块改为 residual block：
-        \[
-          h_{l+1}=h_l+\mathcal{F}_\theta(h_l),
-        \]
-        其中 $\mathcal{F}_\theta$ 由卷积、GroupNorm、SiLU 等组成。残差路径让深层网络更容易优化。
-      \end{block}
-      \begin{exampleblock}{本项目实现}
-        \footnotesize
-        \codepath{src/models/segresnet_baseline.py}\\
-        residual encoders/decoders + $1\times1$ head。
-      \end{exampleblock}
-    \column{0.44\textwidth}
-      \begin{alertblock}{在本版 PPT 中的定位}
-        \footnotesize
-        最新正式结果表只提交了 binary U-Net 量化结果。SegResNet 是可运行的判别式候选模型，但不是本版正式主结果。
-      \end{alertblock}
-      \begin{block}{与 U-Net 的关系}
-        \footnotesize
-        U-Net 强调 skip connection；SegResNet 在此基础上用 residual block 提升深层特征学习稳定性。
-      \end{block}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{判别式方法：DiceCE 训练目标}
-  \begin{columns}[T]
-    \column{0.52\textwidth}
-      \begin{block}{损失函数}
-        \footnotesize
-        本项目判别式 baseline 使用 Cross Entropy 与 Dice loss 的组合：
+        判别式方法直接优化分割目标，训练损失使用 DiceCE：
         \[
           \mathcal{L}_{\mathrm{DiceCE}}
-          = \mathcal{L}_{\mathrm{CE}}
-          + \left(1-\frac{2\sum_i p_i g_i+\epsilon}{\sum_i p_i+\sum_i g_i+\epsilon}\right).
+          =\mathcal{L}_{\mathrm{CE}}
+          +\left(1-\frac{2\sum_i p_i g_i+\epsilon}{\sum_i p_i+\sum_i g_i+\epsilon}\right).
         \]
-        CE 负责像素级分类，Dice 项缓解前景稀疏导致的类别不平衡。
+        CE 保证像素级分类，Dice 项缓解前景类别稀疏问题。
       \end{block}
     \column{0.44\textwidth}
-      \begin{block}{U-Net Binary 配置}
-        \centering\footnotesize
-        \begin{tabular}{lr}
+      \begin{exampleblock}{测试集结果}
+        \centering\tiny
+        \setlength{\tabcolsep}{2.1pt}
+        \begin{tabular}{@{}lcccc@{}}
           \toprule
-          项目 & 设置 \\
+          Model & Mean & Kid. & Tum. & Cyst \\
           \midrule
-          Epoch & 25 \\
-          Batch size & 48 \\
-          Learning rate & $10^{-3}$ \\
-          Weight decay & $10^{-5}$ \\
-          AMP & True \\
+          U-Net 2D & 0.570 & 0.912 & 0.623 & 0.177 \\
+          SegResNet & 0.572 & 0.914 & 0.621 & 0.181 \\
+          U-Net 2.5D & \metricup{0.623} & 0.921 & 0.707 & 0.242 \\
           \bottomrule
         \end{tabular}
-      \end{block}
-      \sourcefoot{配置来自 \texttt{\detokenize{src/configs/unet_binary_100case.yaml}}。}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{判别式结果：U-Net 是强基线}
-  \begin{columns}[T]
-    \column{0.45\textwidth}
-      \begin{block}{测试集结果}
-        \centering\footnotesize
-        \begin{tabular}{lrrr}
-          \toprule
-          Model & Dice & IoU & ms/img \\
-          \midrule
-          U-Net & \metricup{0.8877} & \metricup{0.7981} & \metricup{0.87} \\
-          \bottomrule
-        \end{tabular}
-      \end{block}
-      \begin{exampleblock}{结论}
-        \footnotesize
-        对当前 binary KiTS23 任务，直接判别式建模显著优于条件扩散模型，且推理速度约为毫秒级。
       \end{exampleblock}
-    \column{0.51\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/unet_case.png}
-      \sourcefoot{U-Net qualitative prediction from results/figures/qualitative/unet\_binary\_100case。}
+      \begin{alertblock}{对照意义}
+        \footnotesize
+        判别式模型提供精度和速度参照。生成式模型需要同时说明分割质量、推理成本，以及额外的不确定性表达能力。
+      \end{alertblock}
   \end{columns}
 \end{frame}
 
 \section{生成式模型}
 
-\begin{frame}{生成式模型：为什么用于分割}
-  \begin{block}{从确定映射到条件生成}
-    \footnotesize
-    生成式分割不只学习一个确定掩码，而是尝试建模条件分布：
-    \[
-      p_\theta(y\mid x),\qquad x=\text{CT image},\ y=\text{segmentation mask}.
-    \]
-    这允许多候选输出、不确定性估计，以及可视化从 latent/noise 到 mask 的生成轨迹。
-  \end{block}
+\begin{frame}[shrink=8]{Conditional VAE：把 mask 当作条件生成目标}
   \begin{columns}[T]
-    \column{0.48\textwidth}
-      \begin{exampleblock}{本项目实现}
-        \footnotesize
-        \model{Conditional VAE}: 用 $z$ 表示掩码不确定性。\\
-        \model{Conditional Diffusion}: 从 noisy mask 逐步去噪。
-      \end{exampleblock}
-    \column{0.48\textwidth}
-      \begin{alertblock}{工程挑战}
-        \footnotesize
-        医学前景稀疏；从随机噪声恢复结构化小目标很难，训练目标和分割指标之间存在明显 gap。
-      \end{alertblock}
-  \end{columns}
-\end{frame}
-
-\begin{frame}[shrink=15]{生成式原理 1：VAE}
-  \begin{block}{从最大似然到 ELBO}
-    \scriptsize
-    生成路径为 $z\sim p(z)=\mathcal{N}(0,I),\ x\sim p_\theta(x\mid z)$。边缘似然
-    $\log p_\theta(x)=\log\int p_\theta(x\mid z)p(z)\,dz$ 难直接算，引入近似后验 $q_\phi(z\mid x)$：
-    \[
-      \log p_\theta(x)
-      =
-      \mathcal{L}_{\mathrm{ELBO}}(x)
-      +D_{\mathrm{KL}}\!\left(q_\phi(z\mid x)\,\|\,p_\theta(z\mid x)\right)
-      \ge \mathcal{L}_{\mathrm{ELBO}}(x).
-    \]
-    \[
-      \mathcal{L}_{\mathrm{ELBO}}
-      =
-      \mathbb{E}_{q_\phi(z\mid x)}[\log p_\theta(x\mid z)]
-      -D_{\mathrm{KL}}\!\left(q_\phi(z\mid x)\,\|\,p(z)\right).
-    \]
-  \end{block}
-  \begin{exampleblock}{训练时的可微采样}
-    \scriptsize
-    \[
-      q_\phi(z\mid x)=\mathcal{N}(\mu_\phi(x),\mathrm{diag}(\sigma_\phi^2(x))),
-      \qquad
-      z=\mu_\phi(x)+\sigma_\phi(x)\odot\epsilon,\quad
-      \epsilon\sim\mathcal{N}(0,I).
-    \]
-    重构项保证样本质量，KL 项把 latent space 拉回标准正态，便于采样。
-  \end{exampleblock}
-  \vfill
-  \centering
-  \includegraphics[width=0.78\textwidth]{assets/vae_cvae_diagram.jpg}
-\end{frame}
-
-\begin{frame}[shrink=15]{生成式原理 2：Conditional VAE}
-  \begin{columns}[T,totalwidth=\textwidth]
-    \column{0.57\textwidth}
-      \begin{block}{条件 ELBO}
+    \column{0.55\textwidth}
+      \begin{block}{条件生成建模}
         \scriptsize
-        分割中 $x$ 是 CT 条件，$y$ 是掩码目标。CVAE 建模 $p_\theta(y\mid x)$：
+        分割中 $x$ 是 CT 条件，$y$ 是真实 mask。CVAE 通过 latent variable $z$ 建模：
+        \[
+          q_\phi(z\mid x,y),\qquad p_\theta(y\mid x,z).
+        \]
+        条件 ELBO 为
         \[
           \log p_\theta(y\mid x)\ge
-          \mathbb{E}_{q_\phi(z\mid x,y)}[\log p_\theta(y\mid x,z)]
-          -D_{\mathrm{KL}}\!\left(q_\phi(z\mid x,y)\,\|\,p_\theta(z\mid x)\right).
+          \mathbb{E}_{q_\phi}[\log p_\theta(y\mid x,z)]
+          -D_{\mathrm{KL}}(q_\phi(z\mid x,y)\|p(z)).
         \]
-        若采用标准条件先验 $p(z)$，右侧 KL 项退化为
-        $D_{\mathrm{KL}}(q_\phi(z\mid x,y)\|p(z))$。
       \end{block}
-    \column{0.40\textwidth}
-      \begin{alertblock}{训练 / 推理差异}
+      \begin{exampleblock}{本项目损失}
         \scriptsize
-        训练：encoder 看 $[x,\mathrm{onehot}(y)]$ 得到 posterior。\\
-        推理：真实 $y$ 不可见，只能由 $x$ 和 $z\sim p(z)$ 解码，因此会有 posterior-prior gap。
+        \[
+          \mathcal{L}_{\mathrm{cVAE}}
+          =
+          \mathcal{L}_{\mathrm{DiceCE}}(\hat y,y)
+          +\beta D_{\mathrm{KL}}(q_\phi(z\mid x,y)\|p(z)).
+        \]
+      \end{exampleblock}
+    \column{0.41\textwidth}
+      \begin{alertblock}{cVAE 的局限}
+        \scriptsize
+        训练时 encoder 看到真实 mask；测试时真实 $y$ 不可见，只能从 prior $z\sim p(z)$ 或 $z=0$ 解码。这个 posterior-prior gap 会导致小目标生成不稳定。
+      \end{alertblock}
+      \centering
+      \includegraphics[width=0.92\textwidth]{assets/vae_cvae_diagram.jpg}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[shrink=8]{DDPM / DDIM：从 noisy mask 逐步去噪}
+  \begin{block}{扩散前向过程}
+    \scriptsize
+    对真实 one-hot mask $m_0$ 加高斯噪声：
+    \[
+      q(m_t\mid m_0)=
+      \mathcal{N}(\sqrt{\bar{\alpha}_t}m_0,(1-\bar{\alpha}_t)I),
+      \quad
+      m_t=\sqrt{\bar{\alpha}_t}m_0+\sqrt{1-\bar{\alpha}_t}\epsilon.
+    \]
+  \end{block}
+  \begin{columns}[T]
+    \column{0.50\textwidth}
+      \begin{exampleblock}{标准 DDPM 目标}
+        \scriptsize
+        \[
+          \mathcal{L}_{\epsilon}
+          =
+          \|\epsilon-\epsilon_\theta(x,m_t,t)\|_2^2.
+        \]
+        这个目标在自然图像生成中常用，但在医学分割中容易与 Dice 指标不对齐。
+      \end{exampleblock}
+    \column{0.46\textwidth}
+      \begin{alertblock}{DDIM 采样}
+        \scriptsize
+        测试时不走完整 1000 步，而是在较短时间序列上采样。我们比较 $S=1,5,10,25$ 步，观察精度与速度 trade-off。
       \end{alertblock}
   \end{columns}
-  \begin{exampleblock}{本项目 cVAE 损失}
-    \scriptsize
-    decoder 输入 $[x,z]$ 输出 mask logits：
-    \[
-      \mathcal{L}_{\mathrm{cVAE}}
-      =
-      \mathcal{L}_{\mathrm{DiceCE}}(\hat y,y)
-      +\beta_{\mathrm{KL}}D_{\mathrm{KL}}\!\left(q_\phi(z\mid x,y)\,\|\,p(z)\right).
-    \]
-  \end{exampleblock}
-  \vfill
   \centering
-  \includegraphics[width=0.74\textwidth]{assets/vae_cvae_diagram.jpg}
+  \includegraphics[width=0.58\textwidth]{assets/ddpm_ddim_diagram.png}
 \end{frame}
 
-\begin{frame}[shrink=15]{生成式原理 3：DDPM}
-  \begin{block}{前向加噪：固定，不学习}
-    \scriptsize
-    \[
-      q(x_t\mid x_{t-1})=\mathcal{N}(\sqrt{1-\beta_t}x_{t-1},\beta_t I),
-      \quad
-      \alpha_t=1-\beta_t,\quad
-      \bar{\alpha}_t=\prod_{s=1}^{t}\alpha_s.
-    \]
-    因为高斯链可合并，所以可以从干净样本直接采任意时刻噪声图：
-    \[
-      q(x_t\mid x_0)=
-      \mathcal{N}(\sqrt{\bar{\alpha}_t}x_0,(1-\bar{\alpha}_t)I),
-      \quad
-      x_t=\sqrt{\bar{\alpha}_t}x_0+\sqrt{1-\bar{\alpha}_t}\epsilon.
-    \]
-  \end{block}
-  \begin{exampleblock}{反向去噪：学习噪声预测器}
-    \scriptsize
-    \[
-      p_\theta(x_{t-1}\mid x_t)
-      =
-      \mathcal{N}(\mu_\theta(x_t,t),\Sigma_\theta(x_t,t)),
-      \qquad
-      \mathcal{L}_{\epsilon}=
-      \mathbb{E}_{t,x_0,\epsilon}\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2.
-    \]
-  \end{exampleblock}
-  \vfill
-  \centering
-  \includegraphics[width=0.86\textwidth]{assets/ddpm_ddim_diagram.png}
-\end{frame}
-
-\begin{frame}[shrink=10]{生成式原理 4：DDIM}
-  \begin{block}{由噪声预测恢复 $\hat{x}_0$}
-    \scriptsize
-    DDIM 不重新训练模型，而是复用 DDPM 的 $\epsilon_\theta$，在一个较短时间序列
-    $\tau_S>\cdots>\tau_1$ 上采样。先估计当前样本对应的 clean image：
-    \[
-      \hat{x}_0(x_t,t)=
-      \frac{x_t-\sqrt{1-\bar{\alpha}_t}\epsilon_\theta(x_t,t)}
-      {\sqrt{\bar{\alpha}_t}}.
-    \]
-  \end{block}
-  \begin{exampleblock}{确定性更新，减少采样步}
-    \scriptsize
-    令 $\sigma_t(\eta)=0$，得到常用 deterministic DDIM：
-    \[
-      x_{t-1}
-      =
-      \sqrt{\bar{\alpha}_{t-1}}\hat{x}_0
-      +
-      \sqrt{1-\bar{\alpha}_{t-1}}\epsilon_\theta(x_t,t).
-    \]
-    本项目训练 $T=200$ 个 diffusion steps；测试只取 $S=5/10/25$ 步，速度显著受 $S$ 控制。
-  \end{exampleblock}
-  \begin{alertblock}{对分割的含义}
-    \scriptsize
-    $x_t$ 在项目中对应 noisy one-hot mask，CT 图像作为条件输入；DDIM 决定从随机 mask logits 到 $\hat m_0$ 的反向轨迹。
-  \end{alertblock}
-\end{frame}
-
-\begin{frame}{生成式方法：条件扩散分割}
+\begin{frame}{x0 Diffusion：生成目标设计}
   \begin{columns}[T]
-    \column{0.52\textwidth}
-      \begin{block}{把掩码作为生成变量}
+    \column{0.54\textwidth}
+      \begin{block}{从 epsilon 到 x0}
         \footnotesize
-        本项目把 one-hot mask $m_0$ 作为扩散对象，CT 图像 $x$ 作为条件输入：
-        \[
-          m_t=\sqrt{\bar{\alpha}_t}m_0+\sqrt{1-\bar{\alpha}_t}\epsilon.
-        \]
-        网络输入 $[x,m_t,t]$，输出 $\epsilon_\theta(x,m_t,t)$。
+        早期实验使用 $\epsilon$ prediction，train loss 可以下降，但 validation Dice 长期很低。原因是 MSE 主要被背景和连续噪声主导，不直接优化 mask 结构。
       \end{block}
-      \begin{exampleblock}{训练目标}
+      \begin{exampleblock}{最终主模型：直接预测 clean mask}
         \footnotesize
+        网络输入 CT、noisy mask 和 timestep，直接输出 $\hat m_0$ logits：
         \[
-          \mathcal{L}
-          =
-          \|\epsilon-\epsilon_\theta(x,m_t,t)\|_2^2
-          +0.2\,\mathcal{L}_{\mathrm{DiceCE}}(\hat{m}_0,y).
+          \hat m_0=f_\theta(x,m_t,t).
         \]
-        其中 $\hat{m}_0$ 由噪声预测反推得到。
+        \[
+          \mathcal{L}_{x0}
+          =
+          \mathcal{L}_{\mathrm{DiceCE}}(\hat m_0,m_0)
+          +0.2\|\mathrm{softmax}(\hat m_0)-m_0\|_2^2.
+        \]
       \end{exampleblock}
-    \column{0.44\textwidth}
-      \begin{block}{Diffusion Binary 配置}
-        \centering\footnotesize
+    \column{0.42\textwidth}
+      \begin{alertblock}{关键结论}
+        \footnotesize
+        x0 目标把训练信号直接放在 segmentation mask 上，因此比标准噪声预测更适合 dense prediction。
+      \end{alertblock}
+      \begin{block}{配置}
+        \centering\scriptsize
         \begin{tabular}{lr}
           \toprule
-          项目 & 设置 \\
+          Item & Setting \\
           \midrule
-          Train steps & 200 \\
-          Sampler & DDIM \\
-          Sample steps & 5 / 10 / 25 \\
-          Epoch & 50 \\
-          LR & $2\times10^{-4}$ \\
-          Base channels & 48 \\
+          Train epochs & 80 \\
+          Train steps & 1000 \\
+          Validation sample steps & 5 \\
+          Batch size & 16 \\
+          LR & $10^{-4}$ \\
           \bottomrule
         \end{tabular}
       \end{block}
   \end{columns}
 \end{frame}
 
-\begin{frame}{生成式方法：条件 U-Net 去噪网络}
+\begin{frame}{条件 U-Net 去噪网络}
   \begin{columns}[T]
     \column{0.52\textwidth}
-      \begin{block}{网络结构}
+      \begin{block}{网络输入}
         \footnotesize
         \codepath{src/models/diffusion_unet.py}\\[2pt]
-        stem 输入通道为 image channels + mask channels；每个 residual block 接收 sinusoidal timestep embedding：
+        stem 输入通道为 image channels + mask channels：
+        \[
+          [x,m_t]\in\mathbb{R}^{(1+4)\times256\times256}.
+        \]
+        每个 residual block 接收 sinusoidal timestep embedding：
         \[
           h_{l+1}=\mathrm{ResBlock}(h_l,\mathrm{MLP}(\gamma(t))).
         \]
       \end{block}
       \begin{exampleblock}{推理流程}
         \footnotesize
-        从随机 mask logits $m_T\sim\mathcal{N}(0,I)$ 出发，按 DDIM 逐步得到 $\hat{m}_0$，最后 argmax 得到前景/背景分割。
+        从随机 mask logits $m_T$ 出发，用 DDIM 逐步得到 $\hat m_0$，最后 argmax 得到 4-class segmentation。
       \end{exampleblock}
     \column{0.44\textwidth}
       \centering
-      \includegraphics[width=\textwidth]{assets/diffusion_denoising.png}
-      \sourcefoot{本地 diffusion denoising trajectory。}
+      \includegraphics[width=\textwidth]{assets/axial_diffusion_denoising.png}
+      \sourcefoot{x0 diffusion denoising trajectory, 5 steps.}
   \end{columns}
 \end{frame}
 
-\begin{frame}{生成式结果：采样步数消融}
+\begin{frame}{训练曲线：x0 diffusion 后期仍有提升}
   \begin{columns}[T]
-    \column{0.47\textwidth}
-      \begin{block}{测试集结果}
-        \centering\footnotesize
-        \begin{tabular}{lrrr}
-          \toprule
-          Steps & Dice & IoU & ms/img \\
-          \midrule
-          5  & 0.1682 & 0.0918 & 16.88 \\
-          10 & 0.1683 & 0.0919 & 33.63 \\
-          25 & 0.1689 & 0.0922 & 84.08 \\
-          \bottomrule
-        \end{tabular}
-      \end{block}
-      \begin{alertblock}{现象}
-        \footnotesize
-        步数增加几乎不提升 Dice/IoU，却近似线性增加推理时间，说明当前模型瓶颈不在采样步数。
-      \end{alertblock}
-    \column{0.49\textwidth}
+    \column{0.48\textwidth}
       \centering
-      \includegraphics[width=\textwidth]{assets/diffusion_case.png}
-      \sourcefoot{Conditional diffusion qualitative prediction。}
+      \includegraphics[width=\textwidth]{assets/axial_train_loss.png}
+      \sourcefoot{training loss}
+    \column{0.48\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{assets/axial_mean_dice.png}
+      \sourcefoot{validation Mean Dice}
   \end{columns}
+  \begin{alertblock}{观察}
+    \footnotesize
+    cVAE 很早达到 best 但泛化弱；x0 diffusion 训练到 epoch 80 时验证 Mean Dice 达到 0.532，说明生成式分割比判别式更吃训练目标和训练时长。
+  \end{alertblock}
 \end{frame}
 
-\section{综合结果与讨论}
-
-\begin{frame}{正式量化结果汇总}
-  \begin{block}{Binary KiTS23 100-case Test Set}
-    \centering\footnotesize
-    \begin{tabular}{lcrrr}
+\begin{frame}{主结果：生成式模型完成分割但精度低于判别式}
+  \begin{block}{KiTS23 4-class axial test set}
+    \centering\scriptsize
+    \begin{tabular}{llrrrrr}
       \toprule
-      Model & Type & Steps & Dice & ms/img \\
+      Model & Type & Mean & Kidney & Tumor & Cyst & ms/img \\
       \midrule
-      U-Net & Discriminative & 1 & \metricup{0.8877} & \metricup{0.87} \\
-      Conditional diffusion & Generative & 5  & 0.1682 & 16.88 \\
-      Conditional diffusion & Generative & 10 & 0.1683 & 33.63 \\
-      Conditional diffusion & Generative & 25 & 0.1689 & 84.08 \\
+      U-Net 2D & Disc. & 0.570 & 0.912 & 0.623 & 0.177 & 2.57 \\
+      SegResNet 2D & Disc. & 0.572 & 0.914 & 0.621 & 0.181 & 4.46 \\
+      U-Net 2.5D & Disc. & \metricup{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
+      cVAE & Gen. & 0.201 & 0.521 & 0.058 & 0.023 & 1.24 \\
+      x0 Diffusion, 5 steps & Gen. & \metricup{0.434} & 0.820 & 0.449 & 0.032 & 67.43 \\
       \bottomrule
     \end{tabular}
   \end{block}
   \begin{columns}[T]
     \column{0.48\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/formal_mean_dice.png}
+      \begin{exampleblock}{有效的地方}
+        \footnotesize
+        x0 diffusion 明显优于 cVAE；kidney Dice 达到 0.820，说明模型学到了稳定器官定位。
+      \end{exampleblock}
     \column{0.48\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/formal_mean_iou.png}
+      \begin{alertblock}{主要短板}
+        \footnotesize
+        cyst Dice 只有 0.032，小目标和类别不均衡仍是生成式模型的核心瓶颈。
+      \end{alertblock}
   \end{columns}
 \end{frame}
 
-\begin{frame}{训练曲线：优化难度对比}
+\begin{frame}{采样步数消融：精度与速度权衡}
   \begin{columns}[T]
-    \column{0.48\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/formal_train_loss.png}
-      \sourcefoot{train loss}
-    \column{0.48\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/formal_val_loss.png}
-      \sourcefoot{validation loss}
+    \column{0.46\textwidth}
+      \begin{block}{x0 diffusion test set}
+        \centering\scriptsize
+        \begin{tabular}{rrrr}
+          \toprule
+          Steps & Mean Dice & Mean IoU & ms/img \\
+          \midrule
+          1  & 0.415 & 0.320 & 13.60 \\
+          5  & \metricup{0.434} & \metricup{0.334} & 67.43 \\
+          10 & 0.413 & 0.316 & 134.85 \\
+          25 & 0.418 & 0.317 & 337.09 \\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{alertblock}{结论}
+        \footnotesize
+        5 步是本实验中的最佳折中。10/25 步没有提升 Dice，却几乎线性增加推理时间。
+      \end{alertblock}
+    \column{0.50\textwidth}
+      \begin{exampleblock}{解释}
+        \footnotesize
+        x0 diffusion 在本实验设置下更接近“带 noisy mask 条件的少步分割器”。过多迭代可能在 tumor/cyst 小区域累积误差。
+      \end{exampleblock}
+      \begin{block}{机制解释}
+        \footnotesize
+        生成式分割的瓶颈不只是采样步数，而是目标设计、类别不均衡和条件编码能力。
+      \end{block}
   \end{columns}
-  \begin{alertblock}{解释}
+\end{frame}
+
+\begin{frame}{定性结果：稳定结构与失败模式}
+  \begin{columns}[T]
+    \column{0.50\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{assets/axial_diffusion_case_success.png}
+      \sourcefoot{稳定样例：双侧肾脏区域生成较完整。}
+    \column{0.50\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{assets/axial_diffusion_case_failure.png}
+      \sourcefoot{失败样例：小结构漏检或类别混淆。}
+  \end{columns}
+  \begin{alertblock}{读图要点}
     \footnotesize
-    Diffusion 的噪声 MSE 可以下降，但这不等价于生成结构完整的 foreground mask。稀疏前景和小病灶使生成式 dense prediction 更难优化。
+    diffusion 可以生成合理 kidney 区域，但 tumor/cyst 边界和小目标容易漏检或类别混淆。这与定量表中 kidney 高、cyst 低一致。
   \end{alertblock}
 \end{frame}
 
-\begin{frame}{判别式 vs 生成式：本项目结论}
+\begin{frame}{生成过程与不确定性}
   \begin{columns}[T]
-    \column{0.48\textwidth}
-      \begin{exampleblock}{判别式模型}
+    \column{0.50\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{assets/axial_diffusion_denoising.png}
+      \sourcefoot{去噪轨迹：由 noisy mask 逐步得到 clean mask。}
+    \column{0.46\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{assets/axial_diffusion_uncertainty.png}
+      \sourcefoot{不确定性图：由重复采样的预测熵得到。}
+  \end{columns}
+  \begin{exampleblock}{生成式模型的额外价值}
+    \footnotesize
+    判别式模型通常只输出单个确定 mask；diffusion 可以展示去噪轨迹，并通过重复采样给出边界和小病灶附近的不确定性提示。
+  \end{exampleblock}
+\end{frame}
+
+\section{总结}
+
+\begin{frame}{本项目结论}
+  \begin{columns}[T]
+    \column{0.49\textwidth}
+      \begin{exampleblock}{我们做到了什么}
         \footnotesize
         \begin{itemize}
-          \item 直接优化分割指标相关目标
-          \item 一次前向传播完成推理
-          \item 当前任务上 Dice 0.8877，是可靠强基线
+          \item 将 KiTS23 4-class segmentation 建模为 conditional mask generation
+          \item 实现 cVAE 与 x0 diffusion，并与 U-Net / SegResNet 对比
+          \item 做了采样步数消融、denoising trajectory 和 uncertainty visualization
         \end{itemize}
       \end{exampleblock}
-    \column{0.48\textwidth}
-      \begin{alertblock}{生成式模型}
+    \column{0.49\textwidth}
+      \begin{alertblock}{结果说明什么}
         \footnotesize
         \begin{itemize}
-          \item 有显式生成过程和去噪轨迹
-          \item 可以自然扩展到多样性与不确定性
-          \item 当前实现 Dice 约 0.168，主要价值在方法探索
+          \item x0 diffusion test Mean Dice 0.434，明显优于 cVAE 0.201
+          \item 判别式模型仍更强更快，2.5D U-Net 达到 0.623
+          \item 生成式模型的价值在轨迹、不确定性和分布建模，而不是单点 Dice 最优
         \end{itemize}
       \end{alertblock}
   \end{columns}
-  \vspace{0.6em}
-  \begin{block}{下一版改进方向}
+\end{frame}
+
+\begin{frame}{局限与下一步}
+  \begin{block}{主要局限}
     \footnotesize
-    引入更强条件编码器、foreground-aware loss、mask latent diffusion 或 2.5D/3D 上下文，以降低从纯噪声恢复稀疏医学掩码的难度。
+    \begin{itemize}
+      \item 2D diffusion 缺少完整 3D 上下文；tumor/cyst 小目标仍不稳定
+      \item pixel-space mask diffusion 推理慢，5 steps 已约 67 ms/image
+      \item 标准 epsilon prediction 与 segmentation metric 不对齐，必须改成 x0 目标
+    \end{itemize}
   \end{block}
+  \begin{exampleblock}{可继续提升的方向}
+    \footnotesize
+    2.5D/3D conditional encoder；region-based label；前景区域裁剪；类别重加权 / focal loss；将 diffusion 用作判别式模型之后的 mask refinement，而不是从随机 mask 完整生成。
+  \end{exampleblock}
 \end{frame}
 
 \begin{frame}{参考资料与代码依据}
   \footnotesize
-  \begin{block}{数学推导参考}
+  \begin{block}{相关工作}
     \begin{itemize}
-      \item Jaan Li, \emph{Tutorial - What is a variational autoencoder?}
-      \item Lilian Weng, \emph{From Autoencoder to Beta-VAE}
-      \item Beckham, \emph{A deep dive into conditional variational autoencoders}
-      \item Lilian Weng, \emph{What are Diffusion Models?}
-      \item John See, \emph{DDIM}
+      \item Ronneberger et al., U-Net, MICCAI 2015
+      \item Ho et al., Denoising Diffusion Probabilistic Models, NeurIPS 2020
+      \item Song et al., Denoising Diffusion Implicit Models, ICLR 2021
+      \item Wu et al., MedSegDiff / MedSegDiff-V2
+      \item KiTS23 official repository and challenge reports
     \end{itemize}
   \end{block}
-  \begin{block}{本地代码依据}
+  \begin{block}{本地代码与结果}
     \begin{multicols}{2}
       \tiny
-      \codepath{src/models/unet_baseline.py}\\
-      \codepath{src/models/segresnet_baseline.py}\\
       \codepath{src/models/cvae_seg.py}\\
       \codepath{src/models/diffusion_unet.py}\\
       \codepath{src/diffusion/scheduler.py}\\
-      \codepath{tables/binary_100case_evaluation.csv}
+      \codepath{src/engine/train_diffusion.py}\\
+      \codepath{results/tables/evaluation_main.csv}\\
+      \codepath{results/tables/evaluation_axial_extended.csv}
     \end{multicols}
   \end{block}
 \end{frame}
@@ -632,12 +534,7 @@
   \begin{center}
     \vspace{1em}
     {\Huge\color{ruc}\sffamily 谢谢}\\[1em]
-    \large 生成式模型用于 KiTS23 肾脏肿瘤分割\\[0.8em]
-    \footnotesize 刘嘉俊 2023200431 \quad 安昊宇 2024201650\\
-    \footnotesize 中国人民大学高瓴人工智能学院
   \end{center}
 \end{frame}
 
 \end{document}
-
-

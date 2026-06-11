@@ -1,0 +1,7 @@
+experiment_name: diffusion_axial_25d_x0_multiclass
+inherits: diffusion_x0_2d.yaml
+model:
+  image_channels: 3
+data:
+  input_mode: 2.5d
+  neighbor_slices: 1

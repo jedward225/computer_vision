@@ -9,5 +9,6 @@ python -m src.engine.evaluate --configs \
   src/configs/segresnet_25d.yaml \
   src/configs/cvae.yaml \
   src/configs/diffusion_x0_2d.yaml \
+  src/configs/diffusion_x0_25d.yaml \
   --data-config src/configs/dataset.yaml \
   --output results/tables/evaluation_axial_extended.csv
