@@ -1,4 +1,4 @@
-experiment_name: diffusion_25d_multiclass
+experiment_name: diffusion_25d_stable_multiclass
 inherits: diffusion_2d.yaml
 model:
   image_channels: 3
@@ -7,4 +7,3 @@ model:
 data:
   input_mode: 2.5d
   neighbor_slices: 1
-

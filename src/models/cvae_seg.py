@@ -57,10 +57,12 @@ class ConditionalVAESeg(nn.Module):
 
     def forward(self, image: torch.Tensor, mask: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         if mask is None:
-            z = torch.randn(image.shape[0], self.latent_dim, device=image.device)
+            if self.training:
+                z = torch.randn(image.shape[0], self.latent_dim, device=image.device)
+            else:
+                z = torch.zeros(image.shape[0], self.latent_dim, device=image.device)
             return {"logits": self.decode(image, z)}
         mu, logvar = self.encode(image, mask)
         z = self.reparameterize(mu, logvar)
         logits = self.decode(image, z)
         return {"logits": logits, "mu": mu, "logvar": logvar}
-

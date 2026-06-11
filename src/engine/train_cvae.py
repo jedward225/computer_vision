@@ -38,7 +38,7 @@ def validate(model: torch.nn.Module, loader, criterion: DiceCELoss, device: torc
     for batch in loader:
         image = batch["image"].to(device, non_blocking=True)
         mask = batch["mask"].to(device, non_blocking=True)
-        outputs = model(image, mask)
+        outputs = model(image)
         loss = criterion(outputs["logits"], mask)
         pred = outputs["logits"].argmax(dim=1)
         meter.update(pred, mask)

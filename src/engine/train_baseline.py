@@ -56,7 +56,8 @@ def main() -> None:
     device = get_device()
     num_classes = 2 if args.binary else 4
 
-    train_loader, val_loader = make_loaders(exp_cfg, data_cfg, binary=args.binary, input_mode="2d")
+    input_mode = exp_cfg.get("data", {}).get("input_mode", "2d")
+    train_loader, val_loader = make_loaders(exp_cfg, data_cfg, binary=args.binary, input_mode=input_mode)
     model = build_experiment_model(exp_cfg, num_classes=num_classes).to(device)
     criterion = DiceCELoss(num_classes=num_classes)
     optimizer = torch.optim.AdamW(
@@ -69,7 +70,7 @@ def main() -> None:
     history_path = log_path(exp_cfg)
     best_dice = -1.0
 
-    print(f"Training {exp_cfg['experiment_name']} on {device}")
+    print(f"Training {exp_cfg['experiment_name']} on {device} with input_mode={input_mode}")
     for epoch in range(1, int(exp_cfg["training"]["epochs"]) + 1):
         model.train()
         total_loss = 0.0

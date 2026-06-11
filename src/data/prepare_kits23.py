@@ -82,15 +82,40 @@ def hu_window(image: np.ndarray, center: float, width: float) -> np.ndarray:
     return image.astype(np.float32)
 
 
-def foreground_indices(mask: np.ndarray) -> np.ndarray:
-    spatial_axes = tuple(range(mask.ndim - 1))
+def _slice_axis_from_orientation(nib, image_obj, requested_axis: str | int) -> int:
+    if isinstance(requested_axis, int):
+        if requested_axis < 0 or requested_axis >= len(image_obj.shape):
+            raise ValueError(f"slice_axis {requested_axis} is out of bounds for shape {image_obj.shape}")
+        return requested_axis
+
+    axis_name = str(requested_axis).lower()
+    if axis_name.isdigit():
+        return _slice_axis_from_orientation(nib, image_obj, int(axis_name))
+
+    targets = {
+        "axial": {"i", "s"},
+        "coronal": {"a", "p"},
+        "sagittal": {"l", "r"},
+    }
+    if axis_name not in targets:
+        raise ValueError(f"Unknown slice_axis {requested_axis!r}; expected axial, coronal, sagittal, or an integer axis")
+
+    axcodes = tuple(str(code).lower() for code in nib.aff2axcodes(image_obj.affine))
+    for axis, code in enumerate(axcodes):
+        if code in targets[axis_name]:
+            return axis
+    raise ValueError(f"Could not infer {axis_name} axis from orientation codes {axcodes}")
+
+
+def foreground_indices(mask: np.ndarray, slice_axis: int) -> np.ndarray:
+    spatial_axes = tuple(axis for axis in range(mask.ndim) if axis != slice_axis)
     return np.where(np.any(mask > 0, axis=spatial_axes))[0]
 
 
-def choose_slices(mask: np.ndarray, context_margin: int, empty_stride: int) -> list[int]:
-    depth = mask.shape[-1]
+def choose_slices(mask: np.ndarray, context_margin: int, empty_stride: int, slice_axis: int) -> list[int]:
+    depth = mask.shape[slice_axis]
     selected: set[int] = set()
-    fg = foreground_indices(mask)
+    fg = foreground_indices(mask, slice_axis=slice_axis)
     for z in fg.tolist():
         start = max(0, z - context_margin)
         end = min(depth - 1, z + context_margin)
@@ -99,6 +124,10 @@ def choose_slices(mask: np.ndarray, context_margin: int, empty_stride: int) -> l
     if not selected:
         selected.update(range(depth))
     return sorted(selected)
+
+
+def take_slice(volume: np.ndarray, slice_axis: int, index: int) -> np.ndarray:
+    return np.take(volume, indices=index, axis=slice_axis)
 
 
 def split_cases(case_ids: list[str], seed: int, train_ratio: float, val_ratio: float) -> dict[str, list[str]]:
@@ -128,21 +157,32 @@ def write_csv(path: Path, rows: Iterable[dict[str, object]]) -> int:
     return len(rows)
 
 
-def process_case(case: CaseFiles, output_dir: Path, image_size: int, window_cfg: dict[str, float], keep_cfg: dict[str, int]) -> list[dict[str, object]]:
+def process_case(
+    case: CaseFiles,
+    output_dir: Path,
+    image_size: int,
+    window_cfg: dict[str, float],
+    keep_cfg: dict[str, int],
+    slice_axis_cfg: str | int,
+) -> list[dict[str, object]]:
     nib = _import_nibabel()
-    image = np.asarray(nib.load(str(case.image_path)).get_fdata(dtype=np.float32))
-    mask = np.asarray(nib.load(str(case.mask_path)).get_fdata(dtype=np.float32)).astype(np.uint8)
+    image_obj = nib.load(str(case.image_path))
+    mask_obj = nib.load(str(case.mask_path))
+    image = np.asarray(image_obj.get_fdata(dtype=np.float32))
+    mask = np.asarray(mask_obj.get_fdata(dtype=np.float32)).astype(np.uint8)
 
     if image.shape != mask.shape:
         raise ValueError(f"Shape mismatch for {case.case_id}: image {image.shape}, mask {mask.shape}")
     if image.ndim != 3:
         raise ValueError(f"Expected 3D volume for {case.case_id}, got shape {image.shape}")
 
+    slice_axis = _slice_axis_from_orientation(nib, image_obj, slice_axis_cfg)
     image = hu_window(image, center=window_cfg["center"], width=window_cfg["width"])
     slices = choose_slices(
         mask,
         context_margin=int(keep_cfg.get("context_margin", 3)),
         empty_stride=int(keep_cfg.get("empty_stride", 10)),
+        slice_axis=slice_axis,
     )
 
     case_out = output_dir / "slices" / case.case_id
@@ -150,10 +190,10 @@ def process_case(case: CaseFiles, output_dir: Path, image_size: int, window_cfg:
     rows: list[dict[str, object]] = []
 
     for z in slices:
-        image_z = _resize_2d(image[:, :, z], image_size, order=1).astype(np.float16)
-        mask_z = _resize_2d(mask[:, :, z], image_size, order=0).astype(np.uint8)
+        image_z = _resize_2d(take_slice(image, slice_axis, z), image_size, order=1).astype(np.float16)
+        mask_z = _resize_2d(take_slice(mask, slice_axis, z), image_size, order=0).astype(np.uint8)
         out_path = case_out / f"{case.case_id}_z{z:04d}.npz"
-        np.savez_compressed(out_path, image=image_z, mask=mask_z, case_id=case.case_id, slice_index=z)
+        np.savez(out_path, image=image_z, mask=mask_z, case_id=case.case_id, slice_index=z)
         rows.append(
             {
                 "case_id": case.case_id,
@@ -193,6 +233,7 @@ def main() -> None:
             int(cfg["image_size"]),
             cfg["preprocess"]["hu_window"],
             cfg["preprocess"]["keep_slices"],
+            cfg["preprocess"].get("slice_axis", cfg["preprocess"].get("axis", "axial")),
         )
         all_rows_by_case[case.case_id] = rows
 
@@ -221,6 +262,7 @@ def main() -> None:
         "num_cases": len(cases),
         "splits": counts,
         "classes": cfg["classes"],
+        "slice_axis": cfg["preprocess"].get("slice_axis", cfg["preprocess"].get("axis", "axial")),
     }
     with (processed_root / "metadata.json").open("w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)

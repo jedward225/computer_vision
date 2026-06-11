@@ -73,7 +73,7 @@ bash scripts/train_segresnet.sh
 
 # Train generative models
 bash scripts/train_cvae.sh
-bash scripts/train_diffusion.sh
+bash scripts/train_diffusion.sh  # segmentation-oriented x0 diffusion
 bash scripts/train_diffusion_25d.sh
 
 # Evaluate and generate report figures

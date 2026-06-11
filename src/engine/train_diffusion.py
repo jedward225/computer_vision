@@ -40,13 +40,20 @@ def validate(
     device: torch.device,
     num_classes: int,
     sample_steps: int,
+    prediction_type: str,
 ) -> dict[str, float]:
     model.eval()
     meter = SegmentationMeter(num_classes)
     for batch in loader:
         image = batch["image"].to(device, non_blocking=True)
         mask = batch["mask"].to(device, non_blocking=True)
-        logits = scheduler.ddim_sample(model, image, mask_channels=num_classes, sample_steps=sample_steps)
+        logits = scheduler.ddim_sample(
+            model,
+            image,
+            mask_channels=num_classes,
+            sample_steps=sample_steps,
+            prediction_type=prediction_type,
+        )
         pred = logits.argmax(dim=1)
         meter.update(pred, mask)
     return meter.compute()
@@ -66,6 +73,9 @@ def main() -> None:
         timesteps=int(exp_cfg["diffusion"]["train_steps"]),
         beta_schedule=str(exp_cfg["diffusion"].get("beta_schedule", "cosine")),
     ).to(device)
+    prediction_type = str(exp_cfg["diffusion"].get("prediction_type", "epsilon"))
+    if prediction_type not in {"epsilon", "x0"}:
+        raise ValueError(f"Unknown diffusion prediction_type: {prediction_type}")
     seg_criterion = DiceCELoss(num_classes=num_classes)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -78,6 +88,10 @@ def main() -> None:
     loss_cfg = exp_cfg["training"]["loss"]
     noise_weight = float(loss_cfg.get("noise_mse_weight", 1.0))
     dice_ce_weight = float(loss_cfg.get("dice_ce_weight", 0.0))
+    x0_mse_weight = float(loss_cfg.get("x0_mse_weight", 0.0))
+    seg_loss_max_timestep = int(loss_cfg.get("seg_loss_max_timestep", scheduler.timesteps - 1))
+    x0_clip_value = float(loss_cfg.get("x0_clip_value", 20.0))
+    max_grad_norm = float(exp_cfg["training"].get("max_grad_norm", 0.0))
     val_sample_steps = int(exp_cfg["evaluation"].get("validation_sample_steps", 25))
     best_dice = -1.0
 
@@ -97,24 +111,60 @@ def main() -> None:
 
             optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=amp):
-                pred_noise = model(image, noisy_mask, t)
-                noise_loss = F.mse_loss(pred_noise, noise)
-                if dice_ce_weight:
-                    pred_x0 = scheduler.predict_x0_from_noise(noisy_mask, t, pred_noise)
-                    seg_loss = seg_criterion(pred_x0, mask)
+                model_out = model(image, noisy_mask, t)
+                if prediction_type == "epsilon":
+                    pred_noise = model_out
+                    noise_loss = F.mse_loss(pred_noise, noise)
+                    loss = noise_weight * noise_loss
+                    seg_loss = torch.zeros((), device=device)
+                else:
+                    pred_logits = model_out
+                    seg_loss = seg_criterion(pred_logits, mask)
+                    pred_probs = pred_logits.softmax(dim=1)
+                    x0_mse_loss = F.mse_loss(pred_probs, mask_one_hot)
+                    noise_loss = torch.zeros((), device=device)
+                    loss = dice_ce_weight * seg_loss + x0_mse_weight * x0_mse_loss
+
+            if prediction_type == "epsilon" and dice_ce_weight:
+                seg_mask = t <= seg_loss_max_timestep
+                if bool(seg_mask.any()):
+                    with autocast(enabled=False):
+                        pred_x0 = scheduler.predict_x0_from_noise(
+                            noisy_mask[seg_mask].float(),
+                            t[seg_mask],
+                            model_out[seg_mask].float(),
+                        )
+                        pred_x0 = torch.nan_to_num(
+                            pred_x0,
+                            nan=0.0,
+                            posinf=x0_clip_value,
+                            neginf=-x0_clip_value,
+                        ).clamp(-x0_clip_value, x0_clip_value)
+                        seg_loss = seg_criterion(pred_x0, mask[seg_mask])
+                    loss = loss + dice_ce_weight * seg_loss.to(loss.dtype)
                 else:
                     seg_loss = torch.zeros((), device=device)
-                loss = noise_weight * noise_loss + dice_ce_weight * seg_loss
+
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    "Non-finite diffusion loss detected. "
+                    f"noise_loss={float(noise_loss.detach().float().cpu())} "
+                    f"seg_loss={float(seg_loss.detach().float().cpu())} "
+                    f"t_min={int(t.min().item())} t_max={int(t.max().item())}"
+                )
 
             scaler.scale(loss).backward()
+            if max_grad_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item()) * image.shape[0]
             total_items += image.shape[0]
-            progress.set_postfix(loss=f"{loss.item():.4f}", noise=f"{noise_loss.item():.4f}")
+            progress.set_postfix(loss=f"{loss.item():.4f}", noise=f"{noise_loss.item():.4f}", seg=f"{seg_loss.item():.4f}")
 
         train_loss = total_loss / max(total_items, 1)
-        metrics = validate(model, scheduler, val_loader, device, num_classes, val_sample_steps)
+        metrics = validate(model, scheduler, val_loader, device, num_classes, val_sample_steps, prediction_type)
         row = {"epoch": epoch, "train_loss": train_loss, **metrics}
         append_history(history_path, row)
         print(f"epoch {epoch:03d} train_loss={train_loss:.4f} mean_dice={metrics['mean_dice']:.4f}")

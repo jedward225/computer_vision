@@ -58,6 +58,11 @@ class DiffusionScheduler(nn.Module):
         sqrt_one_minus = extract(self.sqrt_one_minus_alphas_cumprod, timesteps, x_t.shape)
         return (x_t - sqrt_one_minus * noise) / torch.clamp(sqrt_alpha, min=1e-8)
 
+    def predict_noise_from_x0(self, x_t: torch.Tensor, timesteps: torch.Tensor, x0: torch.Tensor) -> torch.Tensor:
+        sqrt_alpha = extract(self.sqrt_alphas_cumprod, timesteps, x_t.shape)
+        sqrt_one_minus = extract(self.sqrt_one_minus_alphas_cumprod, timesteps, x_t.shape)
+        return (x_t - sqrt_alpha * x0) / torch.clamp(sqrt_one_minus, min=1e-8)
+
     @torch.no_grad()
     def ddim_sample(
         self,
@@ -66,6 +71,8 @@ class DiffusionScheduler(nn.Module):
         mask_channels: int,
         sample_steps: int = 25,
         return_trajectory: bool = False,
+        clip_x0: bool = True,
+        prediction_type: str = "epsilon",
     ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         device = image.device
         b, _, h, w = image.shape
@@ -75,11 +82,20 @@ class DiffusionScheduler(nn.Module):
 
         for idx, t in enumerate(timesteps):
             t_batch = torch.full((b,), int(t.item()), device=device, dtype=torch.long)
-            pred_noise = model(image, x, t_batch)
-            x0 = self.predict_x0_from_noise(x, t_batch, pred_noise)
+            model_out = model(image, x, t_batch)
+            if prediction_type == "epsilon":
+                pred_noise = model_out
+                x0 = self.predict_x0_from_noise(x, t_batch, pred_noise)
+                if clip_x0:
+                    x0 = torch.nan_to_num(x0, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            elif prediction_type == "x0":
+                x0 = model_out.softmax(dim=1)
+                pred_noise = self.predict_noise_from_x0(x, t_batch, x0)
+            else:
+                raise ValueError(f"Unknown prediction_type: {prediction_type}")
 
             if return_trajectory:
-                trajectory.append(x0.detach().softmax(dim=1).cpu())
+                trajectory.append(x0.detach().cpu())
 
             if idx == len(timesteps) - 1:
                 x = x0
@@ -92,4 +108,3 @@ class DiffusionScheduler(nn.Module):
         if return_trajectory:
             return x, trajectory
         return x
-

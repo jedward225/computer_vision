@@ -1,6 +1,6 @@
 seed: 2026
 data_root: data/kits23/kits23_repo/dataset
-processed_root: data/processed/kits23_slices
+processed_root: data/processed/kits23_axial_slices
 image_size: 256
 classes:
   background: 0
@@ -13,6 +13,7 @@ split:
   test_ratio: 0.15
 preprocess:
   axis: axial
+  slice_axis: axial
   hu_window:
     center: 40
     width: 400

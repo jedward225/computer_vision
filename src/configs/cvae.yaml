@@ -1,4 +1,4 @@
-experiment_name: cvae_2d_multiclass
+experiment_name: cvae_axial_2d_multiclass
 model:
   name: conditional_vae_seg
   in_channels: 1

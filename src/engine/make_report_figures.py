@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 
@@ -9,6 +10,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate report-ready figures.")
     parser.add_argument("--output-dir", default="results/figures", help="Directory for generated figures.")
     parser.add_argument("--logs-dir", default="logs", help="Directory containing experiment history CSV files.")
+    parser.add_argument("--experiments", nargs="*", default=None, help="Optional experiment names to include.")
     return parser.parse_args()
 
 
@@ -26,18 +28,28 @@ def read_history(path: Path) -> dict[str, list[float]]:
     return values
 
 
-def plot_histories(logs_dir: Path, output_dir: Path) -> int:
+def plot_histories(logs_dir: Path, output_dir: Path, experiments: set[str] | None = None) -> int:
     import matplotlib.pyplot as plt
 
     history_files = sorted(logs_dir.glob("*/history.csv"))
     if not history_files:
         return 0
 
+    histories = []
+    for history_file in history_files:
+        if experiments is not None and history_file.parent.name not in experiments:
+            continue
+        history = read_history(history_file)
+        train_loss = history.get("train_loss", [])
+        if any(not math.isfinite(value) for value in train_loss):
+            print(f"Skipping {history_file}: non-finite train_loss values found")
+            continue
+        histories.append((history_file, history))
+
     for metric in ("train_loss", "val_loss", "mean_dice", "mean_iou"):
         plt.figure(figsize=(7, 4))
         plotted = False
-        for history_file in history_files:
-            history = read_history(history_file)
+        for history_file, history in histories:
             if metric not in history or "epoch" not in history:
                 continue
             plt.plot(history["epoch"], history[metric], label=history_file.parent.name)
@@ -51,14 +63,15 @@ def plot_histories(logs_dir: Path, output_dir: Path) -> int:
         plt.tight_layout()
         plt.savefig(output_dir / f"{metric}.png", dpi=200)
         plt.close()
-    return len(history_files)
+    return len(histories)
 
 
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    count = plot_histories(Path(args.logs_dir), output_dir)
+    experiments = set(args.experiments) if args.experiments else None
+    count = plot_histories(Path(args.logs_dir), output_dir, experiments=experiments)
     if count:
         print(f"Generated training-curve figures from {count} history files into {output_dir}")
     else:

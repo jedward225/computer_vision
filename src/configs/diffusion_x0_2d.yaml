@@ -1,0 +1,17 @@
+experiment_name: diffusion_axial_2d_x0_multiclass
+inherits: diffusion_2d.yaml
+diffusion:
+  prediction_type: x0
+  sample_steps: [1, 5, 10, 25]
+training:
+  epochs: 80
+  batch_size: 16
+  eval_batch_size: 8
+  learning_rate: 0.0001
+  loss:
+    noise_mse_weight: 0.0
+    dice_ce_weight: 1.0
+    x0_mse_weight: 0.2
+  amp: true
+evaluation:
+  validation_sample_steps: 5

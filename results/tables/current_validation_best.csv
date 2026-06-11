@@ -1,0 +1,7 @@
+experiment,split,source,best_epoch,mean_dice,mean_iou,dice_kidney,dice_tumor,dice_cyst,notes
+unet_axial_2d_multiclass,val,logs/unet_axial_2d_multiclass/history.csv,78,0.840544,0.729072,0.916555,0.821666,0.783411,final validation best
+segresnet_axial_2d_multiclass,val,logs/segresnet_axial_2d_multiclass/history.csv,92,0.849651,0.742537,0.922776,0.832456,0.793721,final validation best
+cvae_axial_2d_multiclass,val,logs/cvae_axial_2d_multiclass/history.csv,17,0.253882,0.165592,0.562600,0.066438,0.132609,final validation best
+unet_axial_25d_multiclass,val,logs/unet_axial_25d_multiclass/history.csv,97,0.846195,0.738824,0.925119,0.846126,0.767341,final validation best for optional 2.5D baseline
+segresnet_axial_25d_multiclass,val,logs/segresnet_axial_25d_multiclass/history.csv,90,0.822554,0.705978,0.929465,0.774194,0.764004,final validation best for optional 2.5D baseline
+diffusion_axial_2d_x0_multiclass,val,logs/diffusion_axial_2d_x0_multiclass/history.csv,80,0.531875,0.396451,0.818317,0.511260,0.266049,final validation best

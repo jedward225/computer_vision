@@ -8,12 +8,11 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{microtype}
+\usepackage{hyperref}
 
 \title{生成式模型用于 KiTS23 肾脏肿瘤分割}
 \author{刘嘉俊 2023200431}
 \institute{中国人民大学}
-
-\newcommand{\todoresult}[1]{\textcolor{gray}{[待补充：#1]}}
 
 \begin{document}
 
@@ -21,17 +20,41 @@
 
 \section{项目概述}
 
-本项目完成 Final Project 中的 Task 2：使用生成式模型完成 KiTS23 数据集上的肾脏、肿瘤和囊肿语义分割，并与传统判别式分割模型进行对比。与 Assignment 1 中直接学习映射 $f_\theta(x)\rightarrow y$ 的 U-Net 类方法不同，本项目将分割掩码视为需要生成的目标变量，将语义分割建模为以 CT 图像为条件的掩码生成过程。
+本项目完成 Final Project 中的 Task 2：使用生成式模型完成 KiTS23 数据集上的肾脏、肿瘤和囊肿语义分割，并与传统判别式分割模型进行对比。与直接学习映射 $f_\theta(x)\rightarrow y$ 的 U-Net 类方法不同，本项目将分割掩码视为需要生成的目标变量，将语义分割建模为以 CT 图像为条件的掩码生成过程。
 
-项目的核心模型为条件扩散分割模型。训练时，对真实分割掩码逐步加入高斯噪声，模型接收原始 CT 切片、加噪掩码和扩散时间步，学习恢复干净掩码；推理时，从随机噪声掩码开始，在图像条件引导下逐步去噪得到最终分割结果。为了形成充分对比，实验还包含 U-Net、SegResNet 两个判别式 baseline，以及条件 VAE 分割模型作为轻量生成式 baseline。
+项目实现并比较了三类模型：U-Net 与 SegResNet 作为判别式 baseline，conditional VAE 作为轻量生成式 baseline，conditional diffusion 作为主生成式模型。扩散模型在早期实验中采用噪声预测目标 $\epsilon_\theta$，但该设置虽然能快速降低噪声 MSE，却不能稳定提升分割 Dice；最终主实验改为直接预测干净掩码 $x_0$ 的 x0-diffusion，使训练目标与分割指标更一致。
 
 本项目重点分析以下问题：
 \begin{itemize}
     \item 生成式分割模型在医学图像分割中的精度、速度和训练成本；
+    \item 噪声预测扩散与 x0 预测扩散在密集预测任务中的差异；
     \item 不同生成步数对扩散模型精度和推理时间的影响；
-    \item 2D 输入与 2.5D 上下文输入对肿瘤、囊肿等小结构分割的影响；
-    \item 生成式模型通过多次采样进行不确定性估计的能力。
+    \item 生成式模型通过迭代生成过程和重复采样表达不确定性的能力。
 \end{itemize}
+
+\section{作业要求与完成情况}
+
+大作业要求围绕生成式模型完成密集预测任务，并与 Assignment 1 中常见的判别式方法进行对比。本项目选择 Task 2 语义分割，核心目标是将 KiTS23 肾脏肿瘤分割建模为条件掩码生成问题。表 \ref{tab:requirement_coverage} 总结了作业要求与本项目对应实现。
+
+\begin{table}[H]
+\centering
+\caption{Task 2 与报告要求覆盖情况}
+\label{tab:requirement_coverage}
+\begin{tabular}{p{0.26\linewidth}p{0.64\linewidth}}
+\toprule
+要求 & 本项目实现 \\
+\midrule
+KiTS23 数据准备 & 使用 100 例病例，按患者划分训练/验证/测试集；沿 axial 轴提取 2D 切片；进行 HU window 和归一化。 \\
+生成式分割模型 & 实现 conditional diffusion 和 conditional VAE，将分割掩码作为条件生成目标。 \\
+判别式 baseline & 训练 U-Net 与 SegResNet，并在同一测试集上比较 Dice、IoU 和推理时间。 \\
+训练曲线 & 保存并绘制 training loss、validation Dice、validation IoU 曲线。 \\
+不同 setting 对比 & 对比 cVAE、epsilon diffusion、x0 diffusion；对 x0 diffusion 进行 1/5/10/25 步采样消融。 \\
+生成过程可视化 & 展示扩散模型从噪声掩码到最终预测的 denoising 过程。 \\
+结果可视化 & 选取 6 张测试前景切片，展示原图、真实标注、预测结果和 overlay。 \\
+量化评估 & 汇报 Dice、IoU、各类别 Dice 和 ms/image；分析生成式与判别式模型的精度和速度差异。 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{团队信息与分工}
 
@@ -49,25 +72,31 @@
 \end{tabular}
 \end{table}
 
+\section{相关工作与公开 SOTA}
+
+\subsection{医学图像分割 Baseline}
+
+U-Net 是医学图像分割中最经典的判别式架构之一，其编码器-解码器结构结合 skip connection，在小规模标注数据上仍能取得较强定位能力 \cite{ronneberger2015unet}。KiTS 系列挑战的高分方案也大多建立在 U-Net、3D U-Net、SegResNet、nnU-Net 或其变体之上，而不是纯生成式模型。这说明在医学分割任务中，强判别式模型仍然是必须纳入比较的基线。
+
+\subsection{扩散模型用于分割}
+
+DDPM 将数据生成建模为从高斯噪声逐步去噪的逆过程 \cite{ho2020ddpm}，DDIM 进一步给出了更快的非马尔可夫采样方式，使采样步数可以在质量和速度之间折中 \cite{song2020ddim}。在医学图像分割中，MedSegDiff 将扩散模型用于条件分割，强调 step-wise 条件编码和高频噪声处理 \cite{wu2022medsegdiff}；MedSegDiff-V2 则进一步引入 Transformer 机制，在多种医学分割任务上验证扩散式分割的潜力 \cite{wu2023medsegdiffv2}。本项目借鉴其核心思想：不是直接一步输出分割，而是将 mask 作为生成对象，通过条件去噪得到最终分割。
+
+\subsection{KiTS23 公开高分方案}
+
+公开 KiTS23 高分方案与本项目的设置有明显差异。第一名 NVIDIA 方案使用 MONAI Auto3DSeg，自动训练 SegResNet、DiNTS 和 SwinUNETR 等 3D 模型，并使用 5-fold cross validation、sliding-window inference、kidney region cropping、connected component post-processing 和多模型 ensemble；最终在 KiTS23 官方隐藏测试集上达到 average Dice 0.835、surface Dice 0.723 \cite{myronenko2023kits23}。第二名方案使用多尺度 3D U-Net，将低分辨率和全分辨率预测通过任务相关后处理融合，在官方测试集上达到 average Dice 0.820、surface Dice 0.712 \cite{uhm2023kits23}。另有 2.5D ResUNet ensemble 方案采用 coarse-to-fine 框架，在 kidney、tumor、cyst 上分别报告 Dice 0.954、0.792、0.691 \cite{chen2023kits23}.
+
+因此，公开 SOTA 的共同特点是：利用 3D 或 2.5D 上下文、全量或接近全量病例、交叉验证、多模型集成、器官区域裁剪和连通域后处理。本项目为了满足课程中“生成式密集预测”的核心要求，优先实现和分析生成式分割范式，因此采用 2D 切片和单模型设置。后文的 SOTA 对比主要用于解释差距来源，而不是声称与挑战榜单进行完全公平比较。
+
 \section{数据集与预处理}
 
 \subsection{KiTS23 数据集}
 
-KiTS23 是肾脏肿瘤分割挑战数据集，包含腹部 CT 扫描及对应的体素级分割标注。训练数据中每个病例包含 \texttt{imaging.nii.gz} 和 \texttt{segmentation.nii.gz} 两个 NIfTI 文件。标注类别包括：
-\begin{itemize}
-    \item 0：背景；
-    \item 1：肾脏；
-    \item 2：肿瘤；
-    \item 3：囊肿。
-\end{itemize}
+KiTS23 是肾脏肿瘤分割挑战数据集，包含腹部 CT 扫描及对应的体素级分割标注，官方仓库提供数据下载工具、评价指标和 ranking 代码 \cite{kits23repo}。训练数据中每个病例包含 \texttt{imaging.nii.gz} 和 \texttt{segmentation.nii.gz} 两个 NIfTI 文件。标注类别包括：0 为背景，1 为肾脏，2 为肿瘤，3 为囊肿。
 
-\subsection{2D 与 2.5D 切片构建}
+\subsection{2D 切片构建}
 
-按照作业要求，项目沿 axial 轴将 3D CT 体数据切分为 2D 切片。主实验使用单切片输入；扩展实验使用 2.5D 输入，即将当前切片及其相邻切片拼接为多通道输入：
-\[
-x_z^{2.5D} = [x_{z-1}, x_z, x_{z+1}].
-\]
-这种方式保留了部分 3D 上下文，同时避免完整 3D 扩散模型带来的显存和训练成本。
+按照作业要求，项目沿 axial 轴将 3D CT 体数据切分为 2D 切片。主实验使用单切片输入。该选择可以显著降低扩散模型训练与采样的显存成本，同时便于与 U-Net、SegResNet 和 cVAE 使用统一输入设置进行公平比较。
 
 \subsection{HU 窗位窗宽与归一化}
 
@@ -75,11 +104,13 @@ CT 原始强度先进行 HU 窗位窗宽裁剪。设窗位为 $c$，窗宽为 $w
 \[
 [c-\frac{w}{2}, c+\frac{w}{2}].
 \]
-裁剪后将图像线性归一化到 $[0,1]$。本项目默认使用腹部 CT 常用窗口设置，具体参数见实验配置。
+本项目使用腹部 CT 常用窗口设置 $c=40,w=400$。裁剪后将图像线性归一化到 $[0,1]$，并将切片 resize 到 $256\times256$。
+
+切片筛选采用 foreground-or-context 策略：保留含 kidney、tumor 或 cyst 的前景切片，同时保留前景附近少量上下文切片，并对纯背景切片进行稀疏采样。这样可以避免训练集被大量无器官背景切片主导，同时保留模型判断背景的能力。
 
 \subsection{数据划分}
 
-为避免同一患者的不同切片同时出现在训练集和测试集中，数据划分按患者 ID 完成，而不是按切片随机划分。默认比例为训练集 70\%、验证集 15\%、测试集 15\%。最终实验使用的病例数、切片数和前景切片比例见表 \ref{tab:data_statistics}。
+为避免同一患者的不同切片同时出现在训练集和测试集中，数据划分按患者 ID 完成，而不是按切片随机划分。最终实验使用 100 例病例，划分比例为训练集 70\%、验证集 15\%、测试集 15\%。数据统计见表 \ref{tab:data_statistics}。
 
 \begin{table}[H]
 \centering
@@ -89,14 +120,40 @@ CT 原始强度先进行 HU 窗位窗宽裁剪。设窗位为 $c$，窗宽为 $w
 \toprule
 划分 & 病例数 & 切片数 & 含前景切片数 \\
 \midrule
-训练集 & \todoresult{N} & \todoresult{N} & \todoresult{N} \\
-验证集 & \todoresult{N} & \todoresult{N} & \todoresult{N} \\
-测试集 & \todoresult{N} & \todoresult{N} & \todoresult{N} \\
+训练集 & 70 & 6950 & 5585 \\
+验证集 & 15 & 1624 & 1323 \\
+测试集 & 15 & 1151 & 901 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+\subsection{与官方 KiTS23 评测的差异}
+
+需要说明的是，本项目的标签与官方 KiTS23 challenge 的最终评测区域并不完全一致。课程作业要求可以保留多类标签，因此本项目直接预测 background、kidney、tumor、cyst 四类互斥类别，并报告 kidney、tumor、cyst 三类 Dice 的平均值。公开 KiTS23 高分方案常将任务转为重叠区域的 multi-label segmentation，例如 kidney+mass、mass、tumor 三个区域。这种定义更适合官方 ranking，也更容易利用器官与病灶的层级关系。由于评测区域、训练数据规模和 2D/3D 输入设置都不同，本项目结果不能与官方 leaderboard 数字直接等价比较。
+
 \section{方法}
+
+\subsection{整体流程}
+
+本项目的整体流程如下：首先将 3D CT 体数据预处理为 2D axial 切片，并将 segmentation label 转为 one-hot mask；判别式 baseline 直接学习 $x\rightarrow y$；生成式模型则学习条件分布 $p(y|x)$。对于 diffusion，训练时从真实 mask $m_0$ 采样时间步 $t$ 并生成加噪 mask $m_t$，网络接收 $[x,m_t,t]$ 预测干净 mask 或噪声；推理时从随机噪声 mask 开始，通过 DDIM-style 更新得到最终 mask。该流程满足作业中“以输入图像为条件，生成对应分割掩码”的要求。
+
+\begin{table}[H]
+\centering
+\caption{本项目分割流程}
+\label{tab:pipeline}
+\begin{tabular}{p{0.22\linewidth}p{0.68\linewidth}}
+\toprule
+阶段 & 具体操作 \\
+\midrule
+数据预处理 & NIfTI 读取、axial 2D slicing、HU window、resize、one-hot mask 构建、patient-level split。 \\
+判别式训练 & U-Net/SegResNet 输入 CT 切片，直接输出四类 logits，使用 DiceCE 优化。 \\
+cVAE 训练 & 编码器用 $(x,y)$ 估计后验潜变量，解码器根据 $(x,z)$ 生成 mask；测试时使用先验 $z=0$。 \\
+diffusion 训练 & 对 one-hot mask 加噪，模型输入 CT、noisy mask 和 timestep，学习预测 $\epsilon$ 或 $x_0$。 \\
+diffusion 推理 & 从随机 mask 出发，使用 1/5/10/25 步 DDIM-style 采样，得到最终 segmentation。 \\
+分析输出 & Dice/IoU、推理速度、训练曲线、denoising trajectory、uncertainty map、qualitative overlay。 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{判别式分割 Baseline}
 
@@ -104,12 +161,7 @@ CT 原始强度先进行 HU 窗位窗宽裁剪。设窗位为 $c$，窗宽为 $w
 \[
 \hat{y}=f_\theta(x).
 \]
-本项目使用两类医学图像分割常用结构：
-\begin{itemize}
-    \item U-Net：编码器和解码器之间使用 skip connection，适合作为医学图像分割基础模型；
-    \item SegResNet-style residual network：在卷积块中引入残差连接，作为更强的判别式 baseline。
-\end{itemize}
-训练损失使用 Dice loss 与 cross entropy 的组合，以同时优化区域重叠和逐像素分类。
+本项目使用 U-Net 和 SegResNet-style residual network。U-Net 通过编码器-解码器结构和 skip connection 融合局部细节与高级语义；SegResNet 在卷积块中引入残差连接，作为更强的医学图像分割 baseline。两者均使用 DiceCE 损失，以同时优化区域重叠和逐像素分类。
 
 \subsection{条件 VAE 分割模型}
 
@@ -122,55 +174,43 @@ z \sim q_\phi(z|x,y), \quad \hat{y}=p_\theta(y|x,z).
 \mathcal{L}_{\mathrm{cVAE}} = \mathcal{L}_{\mathrm{seg}}(\hat{y}, y)
 + \beta D_{\mathrm{KL}}\left(q_\phi(z|x,y)\|p(z)\right).
 \]
-cVAE 的作用是提供一个轻量生成式 baseline，用于观察扩散模型相对传统潜变量生成模型的优势。
+测试时不能使用真实掩码，因此从先验 $p(z)$ 生成分割结果。本实验采用 deterministic prior $z=0$ 进行最终评估，以减少随机采样带来的指标方差。
 
 \subsection{条件扩散分割模型}
 
-本项目的主模型为条件扩散分割模型。设真实 one-hot 掩码为 $m_0$，扩散前向过程为
+设真实 one-hot 掩码为 $m_0$，扩散前向过程为
 \[
 q(m_t|m_0)=\sqrt{\bar{\alpha}_t}m_0+\sqrt{1-\bar{\alpha}_t}\epsilon,\quad
 \epsilon\sim\mathcal{N}(0,I).
 \]
-模型接收图像 $x$、加噪掩码 $m_t$ 和时间步 $t$，预测噪声：
-\[
-\epsilon_\theta = \epsilon_\theta(x,m_t,t).
-\]
-基础训练目标为噪声预测均方误差：
+模型接收图像 $x$、加噪掩码 $m_t$ 和时间步 $t$，输出与掩码同尺寸的张量。早期实验使用 DDPM 常见的噪声预测目标：
 \[
 \mathcal{L}_{\mathrm{noise}} =
 \left\|\epsilon-\epsilon_\theta(x,m_t,t)\right\|_2^2.
 \]
-为了让模型更直接对齐分割任务，本项目还加入辅助 DiceCE 损失：
-\[
-\mathcal{L}_{\mathrm{total}} =
-\mathcal{L}_{\mathrm{noise}} + \lambda \mathcal{L}_{\mathrm{DiceCE}}(\hat{m}_0,m_0).
-\]
+该目标在训练中数值收敛很快，但验证 Dice 长期接近 0，说明模型主要学会了从 $m_t$ 中恢复噪声，而没有学到足够强的图像条件分割能力。
 
-\subsection{采样策略}
-
-推理阶段从随机噪声掩码 $m_T$ 出发，逐步去噪生成最终掩码。完整 DDPM 采样计算成本较高，因此本项目重点使用 DDIM 采样，并比较不同采样步数：
+最终主模型改为 x0-diffusion：网络直接预测干净掩码 logits $\hat{m}_0=f_\theta(x,m_t,t)$，训练目标为
 \[
-S \in \{5,10,25,50,100\}.
+\mathcal{L}_{\mathrm{x0}} =
+\mathcal{L}_{\mathrm{DiceCE}}(\hat{m}_0,m_0)
++ \lambda \left\|\mathrm{softmax}(\hat{m}_0)-m_0\right\|_2^2.
 \]
-该实验用于分析扩散模型在分割精度与推理速度之间的权衡。
+该设计保留了以噪声掩码为输入、迭代生成掩码的形式，同时让优化目标直接对齐语义分割指标。
 
-\subsection{不确定性估计}
+\subsection{采样策略与不确定性}
 
-生成式模型可以对同一输入图像重复采样得到多个候选分割结果。设第 $k$ 次采样得到的类别概率为 $p_k(y|x)$，平均预测为
+推理阶段从随机噪声掩码 $m_T$ 出发，逐步预测 $m_0$ 并更新中间状态。完整 DDPM 采样成本较高，因此本项目采用 DDIM-style 采样，并比较 $S\in\{1,5,10,25\}$ 的生成步数。生成式模型还可以对同一输入重复采样得到多个候选分割结果，用平均预测熵
 \[
-\bar{p}(y|x)=\frac{1}{K}\sum_{k=1}^{K}p_k(y|x).
+H(x)=-\sum_c \bar{p}_c(x)\log\bar{p}_c(x)
 \]
-本项目使用预测方差和熵图可视化不确定性：
-\[
-H(x)=-\sum_c \bar{p}_c(x)\log\bar{p}_c(x).
-\]
-该分析用于展示生成式方法在边界区域和小病灶区域的潜在优势。
+可视化不确定性。
 
 \section{实验设置}
 
 \subsection{训练配置}
 
-所有模型均在 NVIDIA A100 环境上训练。优化器默认使用 AdamW，训练时开启混合精度以提高吞吐量。主要超参数见表 \ref{tab:hparams}，完整配置保存在 \texttt{src/configs/}。
+所有模型均在 NVIDIA A100 环境上训练。优化器使用 AdamW，训练时开启混合精度。主要超参数见表 \ref{tab:hparams}，完整配置保存在 \texttt{src/configs/}。
 
 \begin{table}[H]
 \centering
@@ -183,133 +223,204 @@ H(x)=-\sum_c \bar{p}_c(x)\log\bar{p}_c(x).
 U-Net & 100 & 32 & $2\times10^{-4}$ & DiceCE \\
 SegResNet & 100 & 32 & $2\times10^{-4}$ & DiceCE \\
 cVAE & 100 & 32 & $2\times10^{-4}$ & $\beta_{\mathrm{KL}}=10^{-3}$ \\
-Diffusion & 150 & 24 & $1\times10^{-4}$ & 1000 train steps, DDIM sampling \\
+x0 Diffusion & 80 & 16 & $1\times10^{-4}$ & DiceCE + $0.2$ x0-MSE, DDIM sampling \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+模型选择以验证集 Mean Dice 为准保存 best checkpoint。U-Net、SegResNet 和 cVAE 训练 100 epoch；x0 diffusion 训练 80 epoch，验证时使用 5 步采样以控制评估时间。由于扩散模型每次推理需要多次 denoising 前向传播，它的训练和评估成本明显高于一步式分割网络。因此报告中除 Dice/IoU 外，额外记录 \texttt{ms/image}，用于量化生成步数带来的推理开销。
+
 \subsection{评价指标}
 
-测试集上汇报 Dice Score 和 IoU。对多类分割分别计算 kidney、tumor、cyst 的 Dice，并给出前景类别平均值。对生成式模型额外统计单张切片平均推理时间和不同采样步数下的速度变化。
+测试集上汇报 Dice Score 和 IoU。对类别 $c$，Dice 和 IoU 定义为
+\[
+\mathrm{Dice}_c=\frac{2|\hat{Y}_c\cap Y_c|}{|\hat{Y}_c|+|Y_c|},\quad
+\mathrm{IoU}_c=\frac{|\hat{Y}_c\cap Y_c|}{|\hat{Y}_c\cup Y_c|}.
+\]
+多类结果分别计算 kidney、tumor、cyst 的 Dice，并给出三类前景平均值。对生成式模型额外统计单张切片平均推理时间和不同采样步数下的速度变化。
 
 \section{实验结果与分析}
 
 \subsection{训练曲线}
 
-本节展示训练集 loss、验证集 Dice 和验证集 IoU 随 epoch 变化的曲线。
+图 \ref{fig:training_curves} 展示了各模型训练 loss 与验证集指标的变化。旧版 epsilon diffusion 由于出现非有限 loss 被排除在训练曲线之外，但作为失败实验在后文讨论。
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox{0.85\linewidth}{\centering \vspace{1.5cm}待插入训练曲线：loss、Dice、IoU\vspace{1.5cm}}}
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/train_loss.png}
+    \small (a) Training loss
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/mean_dice.png}
+    \small (b) Validation Dice
+\end{minipage}
 \caption{训练过程曲线}
+\label{fig:training_curves}
 \end{figure}
 
 \subsection{主结果对比}
+
+表 \ref{tab:main_results} 给出了 axial 修正版在测试集上的主结果。为保证生成式模型与判别式 baseline 在同一输入设置下比较，主表使用 2D 单切片模型；diffusion 默认采用 5 步采样，这是训练验证时使用的采样设置。
 
 \begin{table}[H]
 \centering
 \caption{测试集主结果对比}
 \label{tab:main_results}
-\begin{tabular}{lccccc}
+\begin{tabular}{llccccc}
 \toprule
-模型 & 类型 & Kidney Dice & Tumor Dice & Cyst Dice & Mean Dice \\
+模型 & 类型 & Kidney & Tumor & Cyst & Mean Dice & ms/image \\
 \midrule
-U-Net & 判别式 & \todoresult{} & \todoresult{} & \todoresult{} & \todoresult{} \\
-SegResNet & 判别式 & \todoresult{} & \todoresult{} & \todoresult{} & \todoresult{} \\
-cVAE-Seg & 生成式 & \todoresult{} & \todoresult{} & \todoresult{} & \todoresult{} \\
-Conditional Diffusion & 生成式 & \todoresult{} & \todoresult{} & \todoresult{} & \todoresult{} \\
+U-Net & 判别式 & 0.912 & 0.623 & 0.177 & 0.570 & 2.57 \\
+SegResNet & 判别式 & 0.914 & 0.621 & 0.181 & 0.572 & 4.46 \\
+cVAE-Seg & 生成式 & 0.521 & 0.058 & 0.023 & 0.201 & 1.24 \\
+x0 Diffusion (5 steps) & 生成式 & 0.820 & 0.449 & 0.032 & 0.434 & 67.43 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{2D 与 2.5D 输入对比}
+从测试集结果看，判别式模型仍然最强，SegResNet 与 U-Net 的 Mean Dice 分别为 0.572 和 0.570。x0 diffusion 的 5 步采样 Mean Dice 为 0.434，明显优于 cVAE 的 0.201，但仍低于判别式 baseline。类别维度上，diffusion 对 kidney 已经有较稳定定位能力，kidney Dice 为 0.820；tumor Dice 为 0.449，说明病灶区域可以部分生成；cyst Dice 仅为 0.032，仍是主要短板。
+
+此外，本项目还训练了 2.5D 判别式扩展 baseline。U-Net 2.5D 在测试集上的 Mean Dice 为 0.623，优于 2D U-Net，说明相邻切片上下文对 KiTS23 这类 3D CT 任务有帮助；SegResNet 2.5D 的 Mean Dice 为 0.493，低于 2D SegResNet，说明引入上下文后仍需要重新调模型容量和正则化。由于 diffusion 和 cVAE 主实验仍采用 2D 输入，为保证主表比较口径一致，2.5D 结果只作为扩展实验和后续优化方向。
+
+cVAE 的测试结果最低，说明后验重建能力不能直接转化为先验生成能力。训练时 encoder 可以看到真实 mask，测试时只能从先验 $z=0$ 生成，存在明显 posterior-prior gap。x0 diffusion 虽然仍低于判别式 baseline，但比 cVAE 更稳定，说明逐步条件去噪比一次性潜变量解码更适合本项目的分割生成任务。
+
+\subsection{与公开 KiTS23 高分结果的差距}
+
+表 \ref{tab:sota_gap} 将本项目结果与公开 KiTS23 高分方案放在一起。该表的目的不是做严格公平排名，而是说明差距来源：公开方案使用 3D 或 2.5D 输入、更多训练病例、交叉验证、ensemble 和后处理；本项目则是课程规模的 2D 单模型生成式分割实验。
 
 \begin{table}[H]
 \centering
-\caption{2D 与 2.5D 输入对比}
-\begin{tabular}{lcccc}
+\caption{本项目与公开 KiTS23 高分方案的设置差异}
+\label{tab:sota_gap}
+\begin{tabular}{p{0.20\linewidth}p{0.31\linewidth}p{0.18\linewidth}p{0.20\linewidth}}
 \toprule
-模型 & 输入形式 & Mean Dice & Tumor Dice & 推理时间/ms \\
+方案 & 主要做法 & 报告结果 & 与本项目差异 \\
 \midrule
-Diffusion & 2D & \todoresult{} & \todoresult{} & \todoresult{} \\
-Diffusion & 2.5D & \todoresult{} & \todoresult{} & \todoresult{} \\
+KiTS23 1st \cite{myronenko2023kits23} & MONAI Auto3DSeg；SegResNet/DiNTS/SwinUNETR 候选；5-fold；15 模型 ensemble；kidney crop 和后处理 & Avg Dice 0.835, Surface Dice 0.723 & 3D、全量训练、ensemble、官方区域评测 \\
+KiTS23 2nd \cite{uhm2023kits23} & 多尺度 3D U-Net；低分辨率与全分辨率融合；连通域和多尺度后处理 & Avg Dice 0.820, Surface Dice 0.712 & 3D、多尺度、强后处理、官方隐藏测试集 \\
+2.5D ResUNet ensemble \cite{chen2023kits23} & 2.5D coarse-to-fine ResUNet 集成，兼顾效率和上下文 & Kidney/Tumor/Cyst Dice 0.954/0.792/0.691 & 2.5D、集成、专门调优小病灶 \\
+本项目 U-Net 2.5D & 相邻切片多通道输入，单模型，DiceCE & Test Mean Dice 0.623 & 课程扩展 baseline，不使用 3D ensemble 和官方后处理 \\
+本项目 x0 diffusion & 2D 条件扩散，直接预测 $x_0$，5 步采样 & Test Mean Dice 0.434 & 生成式主实验，重点分析生成过程和不确定性 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+这个差距符合预期。KiTS23 本质上是 3D CT 分割任务，肾脏、肿瘤和囊肿在相邻切片间具有强连续性；2D 单切片模型无法利用上下文判断一个小低密度区域究竟是 cyst、tumor 还是其他结构。公开高分方案还大量使用 region-based label、foreground crop、connected component analysis 和 ensemble 来减少假阳性。本项目没有把这些工程技巧全部叠上，是因为作业重点是生成式密集预测范式，而不是复现 KiTS23 challenge leaderboard。
+
+\subsection{生成目标设计对比}
+
+表 \ref{tab:diffusion_objective} 对比了两种扩散训练目标。epsilon diffusion 的训练目标为预测高斯噪声，训练 loss 能够下降，但验证 Dice 长期接近 0，说明其目标与分割结果不够对齐。x0 diffusion 直接预测干净掩码，并用 DiceCE 监督，因此显著提升分割性能。
+
+\begin{table}[H]
+\centering
+\caption{扩散生成目标设计对比}
+\label{tab:diffusion_objective}
+\begin{tabular}{lccc}
+\toprule
+设置 & 训练目标 & 最佳验证 Mean Dice & 结论 \\
+\midrule
+epsilon diffusion & 预测噪声 $\epsilon$ & 约 0.07 & 分割质量很差，目标不对齐 \\
+x0 diffusion & 预测干净掩码 $m_0$ & 0.532 & axial 验证集 best，最终测试 5 步 Mean Dice 为 0.434 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+epsilon 目标失败的关键原因在于：segmentation mask 是离散语义结构，而标准高斯加噪后的 $m_t$ 是连续值；当训练目标只要求恢复噪声时，模型可以降低 MSE，却不一定学到“哪些像素属于 kidney/tumor/cyst”。尤其在类别极不均衡时，噪声预测损失被大量背景像素主导，小病灶区域的语义监督很弱。x0 目标直接让网络输出 clean mask logits，并叠加 DiceCE，因此梯度更直接地作用在分割边界和小目标上。
+
 \subsection{DDIM 采样步数消融}
+
+表 \ref{tab:sampling_steps} 给出了 x0 diffusion 在测试集上的采样步数消融。5 步采样取得最高 Mean Dice；继续增加到 10 或 25 步没有带来稳定提升，反而显著增加推理时间。
 
 \begin{table}[H]
 \centering
 \caption{DDIM 采样步数对精度和速度的影响}
+\label{tab:sampling_steps}
 \begin{tabular}{cccc}
 \toprule
-采样步数 & Mean Dice & Mean IoU & 单张推理时间/ms \\
+采样步数 & Mean Dice & Mean IoU & ms/image \\
 \midrule
-5 & \todoresult{} & \todoresult{} & \todoresult{} \\
-10 & \todoresult{} & \todoresult{} & \todoresult{} \\
-25 & \todoresult{} & \todoresult{} & \todoresult{} \\
-50 & \todoresult{} & \todoresult{} & \todoresult{} \\
-100 & \todoresult{} & \todoresult{} & \todoresult{} \\
+1 & 0.415 & 0.320 & 13.60 \\
+5 & 0.434 & 0.334 & 67.43 \\
+10 & 0.413 & 0.316 & 134.85 \\
+25 & 0.418 & 0.317 & 337.09 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Binary 与 Multi-class 分割对比}
-
-除多类分割外，本项目还将 kidney、tumor 和 cyst 合并为前景类别，评估 binary foreground segmentation 的效果。该实验用于分析类别细分对生成式模型训练难度的影响。
-
-\begin{table}[H]
-\centering
-\caption{Binary 与 Multi-class 设置对比}
-\begin{tabular}{lccc}
-\toprule
-设置 & Foreground Dice & Mean Multi-class Dice & 说明 \\
-\midrule
-Binary & \todoresult{} & - & 背景 vs 前景 \\
-Multi-class & \todoresult{} & \todoresult{} & 背景、肾脏、肿瘤、囊肿 \\
-\bottomrule
-\end{tabular}
-\end{table}
+结果说明当前 x0 diffusion 的多步生成收益有限。1 步采样已经达到 0.415，5 步提升到 0.434；但 10 步和 25 步没有继续提高，推理时间却分别增加到 134.85 ms 和 337.09 ms。该现象说明当前模型更接近“带噪声 mask 输入的一步分割器”，过多 denoising 步可能在小目标区域累积误差。
 
 \subsection{生成过程可视化}
 
-为展示扩散模型的迭代生成过程，本项目选取典型测试切片，展示不同去噪步数下的预测掩码变化。
+图 \ref{fig:denoising} 展示了 x0 diffusion 在测试切片上的生成过程。模型从随机噪声掩码出发，在图像条件引导下逐步形成肾脏和病灶区域。相比判别式模型的一步预测，扩散模型的优势在于可以观察中间生成轨迹，但该过程也带来了额外推理开销。
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox{0.85\linewidth}{\centering \vspace{1.5cm}待插入扩散去噪过程可视化\vspace{1.5cm}}}
+\includegraphics[width=0.90\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/000_case_00075_z0018_denoising.png}
 \caption{条件扩散分割模型的掩码生成过程}
+\label{fig:denoising}
 \end{figure}
 
 \subsection{结果可视化}
 
-本节展示测试集中至少 5 张切片的分割结果，包括原图、真实标注、预测结果和 overlay。
+图 \ref{fig:qualitative} 展示了测试集中 6 张含前景切片的分割结果。x0 diffusion 能够较稳定地生成肾脏区域，但对小肿瘤和囊肿的分割仍不稳定，这与表 \ref{tab:main_results} 中 cyst Dice 较低一致。
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox{0.85\linewidth}{\centering \vspace{1.5cm}待插入 qualitative segmentation panels\vspace{1.5cm}}}
-\caption{测试集分割结果可视化}
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/000_case_00075_z0018.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/002_case_00062_z0026.png}
+\end{minipage}
+
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/004_case_00070_z0022.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/006_case_00073_z0066.png}
+\end{minipage}
+
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/008_case_00053_z0072.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/009_case_00053_z0073.png}
+\end{minipage}
+\caption{测试集分割结果可视化：原图、真实标注、预测结果和 overlay}
+\label{fig:qualitative}
 \end{figure}
 
 \subsection{不确定性可视化}
 
-对同一输入切片重复采样 $K$ 次后，计算预测均值、方差和熵图。重点观察肿瘤边界、囊肿与肿瘤混淆区域、低对比度肾脏边界等位置的不确定性。
+图 \ref{fig:uncertainty} 展示了重复采样得到的预测熵图。高不确定性区域通常出现在器官边界、低对比度区域和小病灶附近，说明生成式模型能够提供除单一分割结果之外的置信度参考。
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox{0.85\linewidth}{\centering \vspace{1.5cm}待插入 uncertainty maps\vspace{1.5cm}}}
+\includegraphics[width=0.75\linewidth]{results/figures/qualitative/diffusion_axial_2d_x0_multiclass/000_case_00075_z0018_uncertainty.png}
 \caption{多次采样得到的不确定性可视化}
+\label{fig:uncertainty}
 \end{figure}
 
 \subsection{失败案例分析}
 
-本节整理模型表现较差的测试样本，分析失败原因。预期关注以下情况：
+从定量结果和可视化可以观察到以下失败模式：
 \begin{itemize}
-    \item 小肿瘤或小囊肿漏检；
-    \item tumor 与 cyst 的类别混淆；
-    \item 肾脏边界在低对比度区域出现泄漏或断裂；
-    \item 2D 输入缺少跨切片上下文导致的局部误判。
+    \item diffusion 对 kidney 定位较稳定，但对小病灶仍不稳定。5 步采样下 kidney Dice 为 0.820，而 tumor 和 cyst Dice 分别只有 0.449 和 0.032。
+    \item 判别式 baseline 能显著更好地利用监督信号。2D SegResNet 的 tumor/cyst Dice 为 0.621/0.181，2.5D U-Net 进一步提高到 0.707/0.242，说明上下文和直接监督对小病灶尤其重要。
+    \item 可视化中仍能看到漏检现象，尤其是小面积前景切片上，模型可能只生成 kidney 或直接输出接近全背景的 mask。
 \end{itemize}
 
 \section{生成式方法与判别式方法对比}
@@ -321,36 +432,82 @@ Multi-class & \todoresult{} & \todoresult{} & 背景、肾脏、肿瘤、囊肿 
 \toprule
 维度 & 判别式方法 & 生成式方法 \\
 \midrule
-精度 & 一步预测，训练目标直接对齐分割结果，通常收敛稳定 & 通过迭代生成掩码，精度受采样步数和去噪稳定性影响 \\
-速度 & 单次前向传播，推理速度快 & 多步采样，推理成本明显更高，可通过 DDIM 加速 \\
-训练成本 & 模型和训练流程成熟，调参成本较低 & 需要设计噪声日程、采样器和生成步数，训练成本较高 \\
-可解释性 & 可通过 activation map 或错误案例分析理解结果 & 可观察生成轨迹，并通过多次采样估计不确定性 \\
-多样性 & 通常输出单一确定结果 & 可输出多个候选分割，适合表达边界不确定性 \\
+精度 & 2D SegResNet 和 U-Net 测试 Mean Dice 分别为 0.572/0.570；2.5D U-Net 达到 0.623 & x0 diffusion 5 步测试 Mean Dice 为 0.434，可完成条件掩码生成，但整体精度仍低于判别式模型 \\
+速度 & 单次前向传播，U-Net 约 2.57 ms/image，SegResNet 约 4.46 ms/image & 多步采样需要多次 denoising 前向传播，5 步约 67.43 ms/image，25 步约 337.09 ms/image \\
+训练成本 & 模型和训练流程成熟，调参成本较低 & 对噪声日程、预测目标和采样步数敏感；epsilon 目标在本任务中失败 \\
+可解释性 & 可通过错误案例和类别 Dice 分析结果 & 可观察生成轨迹，并通过多次采样估计不确定性 \\
+多样性 & 通常输出单一确定结果 & 可输出多个候选分割，适合表达边界和小病灶不确定性 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-总体而言，判别式模型仍然是医学分割任务中更高效、更稳定的工程选择；生成式模型的优势主要体现在可建模输出分布、可视化生成过程以及不确定性估计上。对于肿瘤和囊肿这类边界模糊、类别不均衡的小结构，生成式模型的多样性输出可能提供额外诊断参考，但其推理速度和训练复杂度仍是主要局限。
+总体而言，判别式模型仍然是医学分割任务中更高效、更稳定的工程选择；生成式模型的优势主要体现在可建模输出分布、可视化生成过程以及不确定性估计上。对于肿瘤和囊肿这类边界模糊、类别不均衡的小结构，生成式模型的多样性输出可能提供额外参考，但其推理速度和训练复杂度仍是主要局限。
 
 \section{讨论与局限}
 
-本项目的主要局限包括：第一，采用 2D 或 2.5D 切片而非完整 3D 体数据，仍会损失部分空间上下文；第二，肿瘤和囊肿类别数量相对较少，类别不均衡会影响小结构 Dice；第三，扩散模型推理需要多步采样，在实际部署时速度不如 U-Net 类模型；第四，若只使用有限病例训练，生成式模型可能更容易过拟合。
+从绝对数值看，本项目与 KiTS23 公开高分方案仍有明显差距；从课程大作业目标看，本项目完成了生成式分割建模、判别式 baseline、不同生成 setting 对比、训练曲线、生成过程可视化和不确定性分析。因此，本项目的主要价值不是刷新 KiTS23 指标，而是回答“生成式模型用于密集预测时实际会遇到什么问题”。
 
-未来可以进一步探索完整 3D 扩散分割、latent diffusion、基于器官先验的两阶段分割，以及将不确定性图用于后处理或人工复核。
+本项目观察到的主要现象如下：
+\begin{itemize}
+    \item 判别式模型仍然是更强的工程 baseline。测试集上 2D SegResNet 的 Mean Dice 为 0.572，2.5D U-Net 为 0.623；x0 diffusion 5 步采样为 0.434。
+    \item 生成式模型的优势不在单点精度，而在输出分布建模。扩散模型可以展示 denoising trajectory，也可以通过重复采样给出不确定性图，这对边界模糊或小病灶复核有潜在意义。
+    \item 生成目标设计非常关键。标准 epsilon prediction 在本任务上几乎失败，而 x0 prediction 显著提升 Dice，说明医学分割中的扩散模型不能简单照搬自然图像生成的训练目标。
+    \item 小目标是生成式模型的核心瓶颈。2.5D U-Net 的 cyst Dice 为 0.242，而 diffusion 5 步采样仅为 0.032，说明单纯延长训练并不能完全解决类别不均衡和生成采样误差。
+\end{itemize}
+
+本项目的主要局限包括：第一，采用 2D 切片而非完整 3D 体数据，损失跨切片空间上下文；第二，只使用 100 例病例，且未进行 5-fold cross validation；第三，没有使用 kidney foreground crop、connected component post-processing 或模型 ensemble；第四，扩散模型在 pixel-space mask 上采样，推理成本高，且多步采样收益有限；第五，cVAE 在后验重建时表现较好，但使用先验生成时性能明显下降。
+
+\section{进一步优化方向}
+
+如果继续提升成绩，优先级最高的不是继续堆 diffusion epoch，而是补足 KiTS23 高分方案中已经被证明有效的医学分割工程技巧：
+\begin{itemize}
+    \item 进一步强化 2.5D/3D 上下文。当前 2.5D U-Net 已略优于 2D U-Net，后续可以扩大相邻切片范围或改用轻量 3D/2.5D diffusion。
+    \item 改为 region-based label。参考 KiTS23 官方高分方案，将输出定义为 kidney+mass、mass、tumor 等重叠区域，再还原为互斥标签，有助于表达器官和病灶的层级关系。
+    \item 加入类别重加权或 focal loss。当前 cyst 极弱，应该提高小目标类别权重，或对前景 patch 进行更强采样。
+    \item 做简单后处理。去除小连通域、保留最大 kidney connected components、限制 tumor/cyst 出现在 kidney neighborhood 附近，可能减少假阳性。
+    \item 使用 foreground crop 或两阶段框架。先粗定位 kidney 区域，再在局部区域进行精分割，可以减少背景干扰。
+    \item 尝试 latent diffusion 或 mask refinement。将 diffusion 用作判别式模型输出后的 refinement，而不是从随机 mask 完整生成，可能在速度和精度之间更合理。
+\end{itemize}
+
+在当前截止时间下，最值得加入报告和展示的“卷点”是：明确展示 epsilon diffusion 失败到 x0 diffusion 成功的过程、采样步数消融、不确定性图，以及和 KiTS23 SOTA 的方法差距分析。这些内容比再追求少量 Dice 提升更能体现对生成式密集预测的理解。
 
 \section{结论}
 
-本项目围绕 KiTS23 肾脏肿瘤分割任务，构建了判别式 baseline、条件 VAE 和条件扩散分割模型，并从精度、速度、生成过程和不确定性等角度比较生成式与判别式方法。最终实验结果将用于回答生成式模型在医学密集预测任务中是否具有实际优势，以及这种优势是否足以抵消其额外训练和推理成本。
+本项目围绕 KiTS23 肾脏肿瘤分割任务，构建了判别式 baseline、条件 VAE 和条件扩散分割模型，并从精度、速度、生成过程和不确定性等角度比较生成式与判别式方法。最终测试结果显示，2D SegResNet 和 2D U-Net 的 Mean Dice 分别为 0.572 和 0.570，扩展实验中的 2.5D U-Net 进一步达到 0.623；生成式模型中，x0 diffusion 5 步采样达到 0.434，明显优于 cVAE 的 0.201，但仍低于判别式模型。采样步数消融表明，5 步采样优于 1/10/25 步，更多 denoising 步数并不必然带来更高 Dice，却会显著增加推理时间。与公开 KiTS23 高分方案相比，本项目的主要差距来自 2D 输入、单模型、无 ensemble、无强后处理和训练数据规模较小。整体来看，生成式模型能够完成医学图像分割并提供生成轨迹和不确定性信息，但在当前设置下尚不能替代高效稳定的判别式分割模型。
+
+\begin{thebibliography}{99}
+
+\bibitem{kits23repo}
+Nicholas Heller et al. KiTS23 official repository. \url{https://github.com/neheller/kits23}.
+
+\bibitem{ronneberger2015unet}
+Olaf Ronneberger, Philipp Fischer, Thomas Brox. U-Net: Convolutional Networks for Biomedical Image Segmentation. MICCAI 2015. \url{https://arxiv.org/abs/1505.04597}.
+
+\bibitem{ho2020ddpm}
+Jonathan Ho, Ajay Jain, Pieter Abbeel. Denoising Diffusion Probabilistic Models. NeurIPS 2020. \url{https://arxiv.org/abs/2006.11239}.
+
+\bibitem{song2020ddim}
+Jiaming Song, Chenlin Meng, Stefano Ermon. Denoising Diffusion Implicit Models. ICLR 2021. \url{https://arxiv.org/abs/2010.02502}.
+
+\bibitem{wu2022medsegdiff}
+Junde Wu et al. MedSegDiff: Medical Image Segmentation with Diffusion Probabilistic Model. \url{https://arxiv.org/abs/2211.00611}.
+
+\bibitem{wu2023medsegdiffv2}
+Junde Wu et al. MedSegDiff-V2: Diffusion based Medical Image Segmentation with Transformer. \url{https://arxiv.org/abs/2301.11798}.
+
+\bibitem{myronenko2023kits23}
+Andriy Myronenko, Dong Yang, Yufan He, Daguang Xu. Automated 3D Segmentation of Kidneys and Tumors in MICCAI KiTS 2023 Challenge. \url{https://arxiv.org/abs/2310.04110}.
+
+\bibitem{uhm2023kits23}
+Kwang-Hyun Uhm et al. Exploring 3D U-Net Training Configurations and Post-Processing Strategies for the MICCAI 2023 Kidney and Tumor Segmentation Challenge. \url{https://arxiv.org/abs/2312.05528}.
+
+\bibitem{chen2023kits23}
+Cancan Chen, Rongguo Zhang. An Ensemble of 2.5D ResUnet Based Models for Segmentation for Kidney and Masses. \url{https://arxiv.org/abs/2311.15586}.
+
+\end{thebibliography}
 
 \section{AI 工具与开源代码使用说明}
 
-本项目允许参考公开资料和开源代码，但所有引用和借鉴将在此处说明。预期参考内容包括：
-\begin{itemize}
-    \item KiTS23 官方数据集与下载工具；
-    \item 医学图像分割中常用的 U-Net、SegResNet-style baseline、Dice loss 与 Dice/IoU 评价设计；
-    \item DDPM、DDIM、MedSegDiff 等扩散模型和医学分割相关论文；
-    \item 使用 AI 辅助工具进行代码组织、报告草稿生成、调试建议和实验规划。
-\end{itemize}
-最终提交版本将补充具体引用链接、代码借鉴范围和 AI 工具使用细节。
+本项目参考了 KiTS23 官方数据集与下载工具，以及医学图像分割中常用的 U-Net、SegResNet-style baseline、Dice loss、Dice/IoU 评价方式和 DDPM/DDIM 扩散模型思想。项目代码由本人根据课程要求组织实现，未直接复制完整开源训练框架。实验过程中使用 AI 辅助工具进行代码组织、调试建议、报告草稿润色和实验规划，所有实验运行、结果选择和分析结论均由本人完成并核验。
 
 \end{document}

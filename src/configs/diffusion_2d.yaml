@@ -1,4 +1,4 @@
-experiment_name: diffusion_2d_multiclass
+experiment_name: diffusion_2d_stable_multiclass
 model:
   name: conditional_diffusion_unet
   image_channels: 1
@@ -15,14 +15,17 @@ diffusion:
   sample_steps: [5, 10, 25, 50, 100]
 training:
   epochs: 150
-  batch_size: 24
-  eval_batch_size: 16
+  batch_size: 16
+  eval_batch_size: 8
   num_workers: 4
-  learning_rate: 0.0001
+  learning_rate: 0.00005
   weight_decay: 0.00001
+  max_grad_norm: 1.0
   loss:
     noise_mse_weight: 1.0
-    dice_ce_weight: 0.2
+    dice_ce_weight: 0.05
+    seg_loss_max_timestep: 750
+    x0_clip_value: 20.0
   amp: true
 evaluation:
   metrics: [dice, iou]

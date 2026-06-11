@@ -1,60 +1,85 @@
 # tmux Commands
 
-Run these commands from the repository root: `/home/jiajun/CV`.
+Run from `/home/jiajun/CV`.
 
 ## Environment
 
 ```bash
 tmux new -s cv-final
 cd /home/jiajun/CV
-bash scripts/setup_env.sh
-conda activate cv-final
-```
-
-If `conda activate` is not available inside tmux:
-
-```bash
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate cv-final
-```
-
-Check GPU visibility:
-
-```bash
 nvidia-smi
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-## KiTS23 Download
+## Tonight Rescue Run
 
-```bash
-bash scripts/download_kits23.sh --num-cases 100
-```
-
-The expected layout after download is:
+The old processed data used the wrong physical slice axis. The current code writes true axial slices to:
 
 ```text
-data/kits23/kits23_repo/dataset/case_00000/imaging.nii.gz
-data/kits23/kits23_repo/dataset/case_00000/segmentation.nii.gz
+data/processed/kits23_axial_slices
 ```
 
-## First Pipeline Run
+Prepare data first. Use 100 cases if it finishes in a reasonable time; fallback to 50 only if needed.
 
 ```bash
-bash scripts/prepare_data.sh --max-cases 100
-bash scripts/train_unet.sh
+mkdir -p logs/run
+bash scripts/prepare_data.sh --max-cases 100 2>&1 | tee logs/run/prepare_axial_100.log
+```
+
+Check the new split:
+
+```bash
+cat data/processed/kits23_axial_slices/metadata.json
+```
+
+Start the main parallel run. This launches six jobs:
+
+- GPU 0: U-Net 2D
+- GPU 1: SegResNet 2D
+- GPU 2: cVAE 2D
+- GPU 3: x0 diffusion 2D
+- GPU 4: U-Net 2.5D optional
+- GPU 5: SegResNet 2.5D optional
+
+```bash
+bash scripts/train_axial_parallel.sh
+```
+
+Watch logs:
+
+```bash
+tail -f logs/run/diffusion_axial_2d_x0.out
+tail -f logs/run/segresnet_axial_2d.out
+```
+
+## Evaluation
+
+Main four-model table:
+
+```bash
 bash scripts/evaluate_all.sh
 ```
 
-## Full Runs
+Extended table if 2.5D also finishes:
 
 ```bash
-bash scripts/train_unet.sh
-bash scripts/train_segresnet.sh
-bash scripts/train_cvae.sh
-bash scripts/train_diffusion.sh
-bash scripts/train_diffusion_25d.sh
-bash scripts/evaluate_all.sh
-bash scripts/infer_diffusion.sh
+bash scripts/evaluate_axial_extended.sh
+```
+
+Figures:
+
+```bash
 bash scripts/make_figures.sh
+bash scripts/infer_diffusion.sh
 ```
+
+## Second Run If Needed
+
+If only one extra training chance remains, do not rerun everything. Use it for x0 diffusion only:
+
+```bash
+CUDA_VISIBLE_DEVICES=6 bash scripts/train_diffusion_x0.sh 2>&1 | tee logs/run/diffusion_axial_2d_x0_rerun.out
+```
+
+If 2D diffusion is acceptable but 2.5D baselines look much better, use the story in the report: 3D context matters more than extra diffusion steps.

@@ -1,4 +1,4 @@
-experiment_name: unet_2d_multiclass
+experiment_name: unet_axial_2d_multiclass
 model:
   name: unet_2d
   spatial_dims: 2

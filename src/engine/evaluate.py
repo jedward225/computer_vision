@@ -46,9 +46,11 @@ def evaluate_config(config_path: str, data_config: str, binary: bool, device: to
             timesteps=int(exp_cfg["diffusion"]["train_steps"]),
             beta_schedule=str(exp_cfg["diffusion"].get("beta_schedule", "cosine")),
         ).to(device)
+        prediction_type = str(exp_cfg["diffusion"].get("prediction_type", "epsilon"))
         sample_steps_list = exp_cfg["diffusion"].get("sample_steps", [25])
     else:
         scheduler = None
+        prediction_type = "epsilon"
         sample_steps_list = [1]
 
     for sample_steps in sample_steps_list:
@@ -61,7 +63,13 @@ def evaluate_config(config_path: str, data_config: str, binary: bool, device: to
             start = time.perf_counter()
             if model_name == "conditional_diffusion_unet":
                 assert scheduler is not None
-                logits = scheduler.ddim_sample(model, image, mask_channels=num_classes, sample_steps=int(sample_steps))
+                logits = scheduler.ddim_sample(
+                    model,
+                    image,
+                    mask_channels=num_classes,
+                    sample_steps=int(sample_steps),
+                    prediction_type=prediction_type,
+                )
             elif model_name == "conditional_vae_seg":
                 logits = model(image)["logits"]
             else:
