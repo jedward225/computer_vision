@@ -97,15 +97,11 @@
       \begin{block}{从 3D CT 到 2D axial slice}
         \begin{itemize}
           \item 从 NIfTI 文件读取 CT 体数据和体素级标注；
-          \item 根据 affine 信息确定 axial 轴，避免错误切片方向；
           \item 保留前景切片及其上下文，稀疏保留纯背景切片；
           \item 生成训练、验证、测试 CSV，保证 patient-level split。
         \end{itemize}
       \end{block}
     \column{0.42\textwidth}
-      \begin{alertblock}{为什么强调 axial 轴}
-        KiTS23 是 3D CT 分割任务。切片方向错误会让模型看到不符合解剖结构的图像，导致定性结果和 Dice 指标同时失真。
-      \end{alertblock}
       \begin{exampleblock}{输入设置}
         主实验使用 2D 单切片；扩展实验使用 2.5D 输入，即相邻三张切片作为 3 通道。
       \end{exampleblock}
@@ -200,9 +196,8 @@
     \column{0.44\textwidth}
       \begin{exampleblock}{本项目生成式模型}
         \begin{itemize}
-          \item conditional VAE：潜变量生成 mask；
-          \item conditional diffusion：从 noisy mask 逐步去噪得到 clean mask；
-          \item DDIM 采样：比较 1/5/10/25 步。
+          \item conditional VAE；
+          \item conditional diffusion；
         \end{itemize}
       \end{exampleblock}
   \end{columns}
@@ -232,7 +227,7 @@
       \end{exampleblock}
     \column{0.41\textwidth}
       \centering
-      \includegraphics[width=0.92\textwidth]{assets/vae_cvae_diagram.jpg}
+      \includegraphics[width=0.92\textwidth]{assets/vae_cvae_diagram.png}
       \sourcefoot{cVAE 作为轻量生成式基线。}
       \begin{alertblock}{测试阶段}
         测试时真实 mask 不可见，只能从先验生成，因此 cVAE 对小目标更不稳定。
@@ -365,34 +360,36 @@
       \sourcefoot{验证集 Mean Dice}
   \end{columns}
   \begin{alertblock}{观察}
-    cVAE 收敛较早但测试泛化较弱；x0 diffusion 训练到后期仍有提升，最终验证 Mean Dice 达到 0.532。
+    cVAE 收敛较早但测试泛化较弱；x0 diffusion 训练到后期仍有提升。2D diffusion 验证 Mean Dice 达到 0.532，2.5D diffusion 进一步达到 0.617。
   \end{alertblock}
 \end{frame}
 
 \begin{frame}{主实验结果}
   \begin{block}{KiTS23 axial test set}
     \centering
-    \setlength{\tabcolsep}{3.5pt}
+    \scriptsize
+    \setlength{\tabcolsep}{3.2pt}
     \begin{tabular}{llrrrrr}
       \toprule
-      模型 & 类型 & Mean & Kidney & Tumor & Cyst & ms/img \\
+      模型 & 类型 & Mean & 肾脏 & 肿瘤 & 囊肿 & ms/img \\
       \midrule
       U-Net 2D & 判别式 & 0.570 & 0.912 & 0.623 & 0.177 & 2.57 \\
       SegResNet 2D & 判别式 & 0.572 & 0.914 & 0.621 & 0.181 & 4.46 \\
       U-Net 2.5D & 判别式 & \metricup{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
       cVAE & 生成式 & 0.201 & 0.521 & 0.058 & 0.023 & 1.24 \\
-      x0 Diffusion, 5 steps & 生成式 & \metricup{0.434} & 0.820 & 0.449 & 0.032 & 67.43 \\
+      x0扩散 2D, 5步 & 生成式 & 0.434 & 0.820 & 0.449 & 0.032 & 67.43 \\
+      x0扩散 2.5D, 5步 & 生成式 & \metricup{0.534} & 0.891 & 0.610 & 0.101 & 67.40 \\
       \bottomrule
     \end{tabular}
   \end{block}
   \begin{columns}[T]
     \column{0.48\textwidth}
       \begin{exampleblock}{生成式模型结果}
-        x0 diffusion 明显优于 cVAE，说明逐步去噪式 mask 生成比一次性潜变量解码更稳定。
+        x0 diffusion 明显优于 cVAE；加入相邻切片后，生成式模型从 0.434 提升到 0.534。
       \end{exampleblock}
     \column{0.48\textwidth}
       \begin{alertblock}{主要差距}
-        判别式模型仍然更准确、更快；cyst 是所有模型中最困难的类别。
+        2.5D diffusion 已接近 2D 判别式基线，但仍低于 2.5D U-Net；cyst 仍是最困难类别。
       \end{alertblock}
   \end{columns}
 \end{frame}
@@ -402,24 +399,25 @@
     \column{0.46\textwidth}
       \begin{block}{x0 diffusion 测试集}
         \centering
-        \setlength{\tabcolsep}{4pt}
-        \begin{tabular}{rrrr}
+        \setlength{\tabcolsep}{3.2pt}
+        \begin{tabular}{rrrrr}
           \toprule
-          步数 & Mean Dice & Mean IoU & ms/img \\
+          输入 & 步数 & Mean Dice & Mean IoU & ms/img \\
           \midrule
-          1  & 0.415 & 0.320 & 13.60 \\
-          5  & \metricup{0.434} & \metricup{0.334} & 67.43 \\
-          10 & 0.413 & 0.316 & 134.85 \\
-          25 & 0.418 & 0.317 & 337.09 \\
+          2D & 1  & 0.415 & 0.320 & 13.60 \\
+          2D & 5  & 0.434 & 0.334 & 67.43 \\
+          2.5D & 1  & \metricup{0.537} & \metricup{0.435} & 13.67 \\
+          2.5D & 5  & 0.534 & 0.432 & 67.40 \\
+          2.5D & 25 & 0.518 & 0.416 & 336.77 \\
           \bottomrule
         \end{tabular}
       \end{block}
     \column{0.50\textwidth}
       \begin{alertblock}{结论}
-        在当前设置下，采样步数并非越多越好。5 步采样取得最高 Dice，10/25 步没有继续提升，却显著增加推理时间。
+        在当前设置下，采样步数并非越多越好。2.5D 输入显著提升 Dice；1 步和 5 步结果接近，25 步没有继续提升。
       \end{alertblock}
       \begin{exampleblock}{解释}
-        分割任务更关注语义区域是否正确，多步迭代可能在 tumor/cyst 小区域累积误差。
+        分割任务更关注语义区域是否正确，多步迭代可能在 tumor/cyst 小区域累积误差；相邻切片上下文比单纯增加步数更有效。
       \end{exampleblock}
   \end{columns}
 \end{frame}
@@ -471,7 +469,8 @@
     \column{0.49\textwidth}
       \begin{alertblock}{核心结论}
         \begin{itemize}
-          \item x0 diffusion 的 Mean Dice 为 0.434，明显优于 cVAE 的 0.201；
+          \item 2D x0 diffusion 的 Mean Dice 为 0.434，明显优于 cVAE 的 0.201；
+          \item 2.5D x0 diffusion 进一步提升到 0.534，说明相邻切片上下文对生成式模型有效；
           \item 判别式模型仍然更强，2.5D U-Net 达到 0.623；
           \item 生成式模型的优势主要体现在生成过程和不确定性表达。
         \end{itemize}
@@ -482,8 +481,8 @@
 \begin{frame}{局限与后续方向}
   \begin{block}{主要局限}
     \begin{itemize}
-      \item 2D diffusion 缺少完整 3D 上下文，tumor/cyst 小目标仍不稳定；
-      \item pixel-space mask diffusion 推理较慢，5 步已约 67 ms/image；
+      \item 2.5D diffusion 已明显优于 2D diffusion，但仍低于 2.5D U-Net；
+      \item pixel-space mask diffusion 推理较慢，5 步约 67 ms/image；
       \item 当前只使用 100 例病例，未使用交叉验证、模型集成和强后处理。
     \end{itemize}
   \end{block}

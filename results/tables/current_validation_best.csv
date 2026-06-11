@@ -5,3 +5,4 @@ cvae_axial_2d_multiclass,val,logs/cvae_axial_2d_multiclass/history.csv,17,0.2538
 unet_axial_25d_multiclass,val,logs/unet_axial_25d_multiclass/history.csv,97,0.846195,0.738824,0.925119,0.846126,0.767341,final validation best for optional 2.5D baseline
 segresnet_axial_25d_multiclass,val,logs/segresnet_axial_25d_multiclass/history.csv,90,0.822554,0.705978,0.929465,0.774194,0.764004,final validation best for optional 2.5D baseline
 diffusion_axial_2d_x0_multiclass,val,logs/diffusion_axial_2d_x0_multiclass/history.csv,80,0.531875,0.396451,0.818317,0.511260,0.266049,final validation best
+diffusion_axial_25d_x0_multiclass,val,logs/diffusion_axial_25d_x0_multiclass/history.csv,80,0.616600,0.486133,0.878298,0.656002,0.315501,final validation best for 2.5D x0 diffusion
