@@ -91,23 +91,6 @@
   \end{columns}
 \end{frame}
 
-\begin{frame}{数据处理流程}
-  \begin{columns}[T]
-    \column{0.54\textwidth}
-      \begin{block}{从 3D CT 到 2D axial slice}
-        \begin{itemize}
-          \item 从 NIfTI 文件读取 CT 体数据和体素级标注；
-          \item 保留前景切片及其上下文，稀疏保留纯背景切片；
-          \item 生成训练、验证、测试 CSV，保证 patient-level split。
-        \end{itemize}
-      \end{block}
-    \column{0.42\textwidth}
-      \begin{exampleblock}{输入设置}
-        主实验使用 2D 单切片；扩展实验使用 2.5D 输入，即相邻三张切片作为 3 通道。
-      \end{exampleblock}
-  \end{columns}
-\end{frame}
-
 \section{方法设计}
 
 \begin{frame}{整体实验设计}
@@ -135,16 +118,70 @@
   \end{block}
 \end{frame}
 
+\begin{frame}{评价指标：Dice、IoU 与推理时间}
+  \begin{columns}[T]
+    \column{0.50\textwidth}
+      \begin{block}{前景 Dice}
+        对类别 $c$：
+        \[
+          \mathrm{Dice}_c
+          =
+          \frac{2|\hat Y_c\cap Y_c|}
+          {|\hat Y_c|+|Y_c|}.
+        \]
+        本项目主指标为三类前景平均：
+        \[
+          \mathrm{MeanDice}
+          =
+          \frac{D_{\mathrm{kidney}}+D_{\mathrm{tumor}}+D_{\mathrm{cyst}}}{3}.
+        \]
+      \end{block}
+    \column{0.46\textwidth}
+      \begin{exampleblock}{其他报告指标}
+        \begin{itemize}
+          \item \model{Mean IoU}：前景三类 IoU 平均；
+          \item \model{Kidney/Tumor/Cyst Dice}：分析各器官表现；
+          \item \model{ms/img}：单张 axial slice 推理时间；
+          \item \model{sample steps}：diffusion 去噪采样步数。
+        \end{itemize}
+      \end{exampleblock}
+      \begin{alertblock}{注意}
+        Mean Dice 和 Mean IoU 不包含 background，避免大面积背景使分数虚高。
+      \end{alertblock}
+  \end{columns}
+\end{frame}
+
 \section{判别式模型}
 
-\begin{frame}{判别式基线：U-Net、SegResNet 与 2.5D 输入}
+\begin{frame}{U-Net 与 SegResNet：判别式基线}
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+      \begin{block}{U-Net}
+        \begin{itemize}
+          \item 外部结构：encoder--decoder；
+          \item 长 skip connection：连接 encoder 与 decoder；
+          \item 局部模块：普通两层卷积块。
+        \end{itemize}
+      \end{block}
+    \column{0.48\textwidth}
+      \begin{exampleblock}{SegResNet}
+        \begin{itemize}
+          \item 外部结构：同样是 encoder--decoder；
+          \item 长 skip connection：同样保留多尺度细节；
+          \item 局部模块：将普通卷积块替换为 residual block。
+        \end{itemize}
+      \end{exampleblock}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{判别式训练目标与 2.5D 输入}
   \begin{columns}[T]
     \column{0.52\textwidth}
       \begin{block}{模型思路}
         \begin{itemize}
-          \item \model{U-Net}：编码器-解码器结构，通过 skip connection 保留空间细节；
-          \item \model{SegResNet}：残差块增强特征表达能力；
-          \item \model{2.5D U-Net}：将相邻切片拼接为多通道输入，引入局部 3D 上下文。
+          \item 2D 输入：仅使用当前 axial slice；
+          \item 2.5D 输入：使用 $[x_{z-1},x_z,x_{z+1}]$ 三张相邻切片作为 3 通道；
+          \item 输出仍为当前 slice 的四类分割 mask。
         \end{itemize}
       \end{block}
     \column{0.44\textwidth}
@@ -165,6 +202,7 @@
 \begin{frame}{判别式基线结果}
   \begin{block}{测试集结果}
     \centering
+    \small
     \setlength{\tabcolsep}{4pt}
     \begin{tabular}{lrrrrr}
       \toprule
@@ -172,12 +210,13 @@
       \midrule
       U-Net 2D & 0.570 & 0.912 & 0.623 & 0.177 & 2.57 \\
       SegResNet 2D & 0.572 & 0.914 & 0.621 & 0.181 & 4.46 \\
-      U-Net 2.5D & \metricup{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
+      U-Net 2.5D & \textbf{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
+      SegResNet 2.5D & 0.493 & 0.927 & 0.421 & 0.131 & 4.44 \\
       \bottomrule
     \end{tabular}
   \end{block}
   \begin{alertblock}{观察}
-    2.5D U-Net 明显优于 2D U-Net，说明相邻切片上下文对肿瘤和囊肿等小结构有帮助。
+    2.5D U-Net 明显优于 2D U-Net；但 SegResNet 2.5D 在测试集上未超过 2D 版本，说明相邻切片上下文需要和模型结构、训练稳定性共同作用。
   \end{alertblock}
 \end{frame}
 
@@ -201,7 +240,6 @@
         \end{itemize}
       \end{exampleblock}
   \end{columns}
-  \takeaway{生成式模型的目标不是只追求单点 Dice，而是同时提供生成过程和不确定性分析。}
 \end{frame}
 
 \begin{frame}{条件 VAE：潜变量生成分割掩码}
@@ -235,63 +273,122 @@
   \end{columns}
 \end{frame}
 
+\begin{frame}{条件 VAE：ELBO 推导}
+  \small
+  对本任务，条件是 CT 图像 $x$，要生成的是分割 mask $y$。目标是最大化条件似然 $\log p_\theta(y\mid x)$：
+  \[
+  \begin{aligned}
+    \log p_\theta(y\mid x)
+    &= \log \int p_\theta(y,z\mid x)\,dz \\
+    &= \log \int
+      \frac{q_\phi(z\mid x,y)}{q_\phi(z\mid x,y)}
+      p_\theta(y\mid x,z)p(z)\,dz \\
+    &\ge
+      \mathbb{E}_{q_\phi(z\mid x,y)}
+      \left[
+        \log p_\theta(y\mid x,z)
+      \right]
+      -
+      D_{\mathrm{KL}}\!\left(q_\phi(z\mid x,y)\|p(z)\right).
+  \end{aligned}
+  \]
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+      \begin{block}{重建项}
+        让生成的 mask $\hat y$ 接近真实标注 $y$，实现中用 DiceCE 近似负对数似然。
+      \end{block}
+    \column{0.48\textwidth}
+      \begin{alertblock}{正则项}
+        将后验 $q_\phi(z\mid x,y)$ 拉近先验 $p(z)=\mathcal{N}(0,I)$，使测试时可以从先验采样。
+      \end{alertblock}
+  \end{columns}
+\end{frame}
+
 \begin{frame}{条件扩散模型：从 noisy mask 到 clean mask}
-  \begin{block}{扩散前向过程}
-    对真实 one-hot mask $m_0$ 加噪：
+  \small
+  \begin{block}{前向加噪：只固定边缘分布}
+    对真实 one-hot mask $m_0$ 加噪，并保持 $q(m_t\mid m_0)$ 的闭式形式：
     \[
       m_t=\sqrt{\bar{\alpha}_t}m_0+\sqrt{1-\bar{\alpha}_t}\epsilon,\quad
       \epsilon\sim\mathcal{N}(0,I).
     \]
   \end{block}
   \begin{columns}[T]
-    \column{0.48\textwidth}
-      \begin{exampleblock}{条件去噪网络}
-        网络输入 CT 图像 $x$、加噪 mask $m_t$ 和时间步 $t$，输出对 clean mask 的估计。
-      \end{exampleblock}
-    \column{0.48\textwidth}
-      \begin{alertblock}{采样阶段}
-        推理时从随机 mask 出发，用 DDIM 逐步更新，最终通过 argmax 得到四类分割结果。
-      \end{alertblock}
-  \end{columns}
-  \centering
-  \includegraphics[width=0.55\textwidth]{assets/ddpm_ddim_diagram.png}
-\end{frame}
-
-\begin{frame}{x0 Diffusion：使生成目标对齐分割指标}
-  \begin{columns}[T]
-    \column{0.55\textwidth}
-      \begin{block}{直接预测 clean mask}
-        本项目采用 x0 形式，让网络直接输出 clean mask logits：
+    \column{0.50\textwidth}
+      \begin{exampleblock}{x0 条件去噪}
         \[
           \hat m_0=f_\theta(x,m_t,t).
         \]
-        训练目标为：
+        再由 $\hat m_0$ 反推出噪声方向：
+        \[
+          \hat\epsilon_t=
+          \frac{m_t-\sqrt{\bar\alpha_t}\hat m_0}
+          {\sqrt{1-\bar\alpha_t}}.
+        \]
+      \end{exampleblock}
+    \column{0.46\textwidth}
+      \begin{alertblock}{DDIM 跳步采样}
+        DDIM 不要求沿完整马尔可夫链逐步反推，而是选择子序列 $t\to t'$：
+        \[
+          m_{t'}=
+          \sqrt{\bar\alpha_{t'}}\hat m_0+
+          \sqrt{1-\bar\alpha_{t'}}\hat\epsilon_t.
+        \]
+        这里等价于取 $\sigma_t=0$，采样过程确定，可用很少步数完成推理。
+      \end{alertblock}
+  \end{columns}
+  \vspace{0.35em}
+  \begin{block}{Setting}
+    训练使用 $T=1000$ 的噪声时间步；测试时只取 1/5/10/25 个 DDIM 采样步进行比较。
+  \end{block}
+\end{frame}
+
+\begin{frame}{x0 Diffusion：使生成目标对齐分割指标}
+  \scriptsize
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+      \begin{block}{传统 $\epsilon$ 预测的目标错位}
+        若网络学习噪声，训练目标主要是：
+        \[
+          \mathcal{L}_{\epsilon}
+          =
+          \mathbb{E}_{t,\epsilon}
+          \left[
+            \|\epsilon_\theta(x,m_t,t)-\epsilon\|_2^2
+          \right].
+        \]
+        它关注高斯噪声的数值误差；但最终评估发生在离散 mask 上：
+        \[
+          \hat y=\arg\max_c \hat m_{0,c},
+          \qquad
+          \mathrm{Dice}(\hat y,y),\ \mathrm{IoU}(\hat y,y).
+        \]
+        因此噪声 MSE 下降，不一定等价于 tumor/cyst 区域重叠变好。
+      \end{block}
+    \column{0.48\textwidth}
+      \begin{alertblock}{x0 预测的目标对齐}
+        本项目直接预测 clean mask logits：
+        \[
+          \hat m_0=f_\theta(x,m_t,t).
+        \]
+        这样可以直接在分割空间监督：
         \[
           \mathcal{L}_{x0}
           =
-          \mathcal{L}_{\mathrm{DiceCE}}(\hat m_0,m_0)
+          \mathcal{L}_{\mathrm{CE}}(\hat m_0,y)
+          +
+          \mathcal{L}_{\mathrm{Dice}}(\hat m_0,y)
           +0.2\|\mathrm{softmax}(\hat m_0)-m_0\|_2^2.
         \]
-      \end{block}
-    \column{0.41\textwidth}
-      \begin{exampleblock}{设计动机}
-        医学分割关注语义区域重叠。直接预测 clean mask 可以让训练信号更接近 Dice / IoU 等分割指标。
-      \end{exampleblock}
-      \begin{block}{主要设置}
-        \centering
-        \setlength{\tabcolsep}{4pt}
-        \begin{tabular}{lr}
-          \toprule
-          项目 & 设置 \\
-          \midrule
-          epoch & 80 \\
-          batch size & 16 \\
-          learning rate & $10^{-4}$ \\
-          验证采样步数 & 5 \\
-          \bottomrule
-        \end{tabular}
-      \end{block}
+        损失函数直接惩罚类别错误和区域重叠不足，与 Dice/IoU 的评价对象一致。
+      \end{alertblock}
   \end{columns}
+  \vspace{0.25em}
+  \begin{exampleblock}{与 DDIM 采样兼容}
+    即使网络预测的是 $\hat m_0$，仍可由
+    $\hat\epsilon_t=(m_t-\sqrt{\bar\alpha_t}\hat m_0)/\sqrt{1-\bar\alpha_t}$
+    得到噪声方向，再进行 DDIM 跳步更新。
+  \end{exampleblock}
 \end{frame}
 
 \begin{frame}{条件 U-Net 去噪网络}
@@ -316,37 +413,6 @@
 \end{frame}
 
 \section{实验与结果}
-
-\begin{frame}{实验设置}
-  \begin{columns}[T]
-    \column{0.48\textwidth}
-      \begin{block}{训练设置}
-        \centering
-        \setlength{\tabcolsep}{3pt}
-        \begin{tabular}{lccc}
-          \toprule
-          模型 & Epoch & BS & LR \\
-          \midrule
-          U-Net / SegResNet & 100 & 32 & $2\times10^{-4}$ \\
-          cVAE & 100 & 32 & $2\times10^{-4}$ \\
-          x0 Diffusion & 80 & 16 & $1\times10^{-4}$ \\
-          \bottomrule
-        \end{tabular}
-      \end{block}
-    \column{0.48\textwidth}
-      \begin{exampleblock}{评价指标}
-        \begin{itemize}
-          \item Mean Dice / Mean IoU；
-          \item kidney、tumor、cyst 各类别 Dice；
-          \item 单张切片推理时间 ms/image；
-          \item diffusion 额外比较采样步数。
-        \end{itemize}
-      \end{exampleblock}
-  \end{columns}
-  \begin{alertblock}{模型选择}
-    所有模型均按验证集 Mean Dice 保存 best checkpoint，再在固定测试集上汇报结果。
-  \end{alertblock}
-\end{frame}
 
 \begin{frame}{训练曲线}
   \begin{columns}[T]
@@ -375,10 +441,11 @@
       \midrule
       U-Net 2D & 判别式 & 0.570 & 0.912 & 0.623 & 0.177 & 2.57 \\
       SegResNet 2D & 判别式 & 0.572 & 0.914 & 0.621 & 0.181 & 4.46 \\
-      U-Net 2.5D & 判别式 & \metricup{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
+      U-Net 2.5D & 判别式 & \textbf{0.623} & 0.921 & 0.707 & 0.242 & 2.49 \\
+      SegResNet 2.5D & 判别式 & 0.493 & 0.927 & 0.421 & 0.131 & 4.44 \\
       cVAE & 生成式 & 0.201 & 0.521 & 0.058 & 0.023 & 1.24 \\
       x0扩散 2D, 5步 & 生成式 & 0.434 & 0.820 & 0.449 & 0.032 & 67.43 \\
-      x0扩散 2.5D, 5步 & 生成式 & \metricup{0.534} & 0.891 & 0.610 & 0.101 & 67.40 \\
+      x0扩散 2.5D, 5步 & 生成式 & \textbf{0.534} & 0.891 & 0.610 & 0.101 & 67.40 \\
       \bottomrule
     \end{tabular}
   \end{block}
@@ -395,62 +462,58 @@
 \end{frame}
 
 \begin{frame}{采样步数消融}
-  \begin{columns}[T]
-    \column{0.46\textwidth}
-      \begin{block}{x0 diffusion 测试集}
-        \centering
-        \setlength{\tabcolsep}{3.2pt}
-        \begin{tabular}{rrrrr}
-          \toprule
-          输入 & 步数 & Mean Dice & Mean IoU & ms/img \\
-          \midrule
-          2D & 1  & 0.415 & 0.320 & 13.60 \\
-          2D & 5  & 0.434 & 0.334 & 67.43 \\
-          2.5D & 1  & \metricup{0.537} & \metricup{0.435} & 13.67 \\
-          2.5D & 5  & 0.534 & 0.432 & 67.40 \\
-          2.5D & 25 & 0.518 & 0.416 & 336.77 \\
-          \bottomrule
-        \end{tabular}
-      \end{block}
-    \column{0.50\textwidth}
-      \begin{alertblock}{结论}
-        在当前设置下，采样步数并非越多越好。2.5D 输入显著提升 Dice；1 步和 5 步结果接近，25 步没有继续提升。
-      \end{alertblock}
-      \begin{exampleblock}{解释}
-        分割任务更关注语义区域是否正确，多步迭代可能在 tumor/cyst 小区域累积误差；相邻切片上下文比单纯增加步数更有效。
-      \end{exampleblock}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{定性结果：稳定结构与失败模式}
-  \begin{columns}[T]
-    \column{0.50\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/axial_diffusion_case_success.png}
-      \sourcefoot{稳定样例：双侧肾脏区域生成较完整。}
-    \column{0.50\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/axial_diffusion_case_failure.png}
-      \sourcefoot{失败样例：小结构漏检或类别混淆。}
-  \end{columns}
-  \begin{alertblock}{读图要点}
-    diffusion 可以生成合理 kidney 区域，但 tumor/cyst 边界和小目标容易漏检。这与定量结果中 kidney 高、cyst 低一致。
+  \begin{block}{x0 diffusion 测试集}
+    \centering
+    \small
+    \setlength{\tabcolsep}{7pt}
+    \begin{tabular}{lrrrr}
+      \toprule
+      输入 & 步数 & Mean Dice & Mean IoU & ms/img \\
+      \midrule
+      2D & 1  & 0.420 & 0.321 & 13.66 \\
+      2D & 5  & 0.436 & 0.330 & 67.12 \\
+      2D & 10 & 0.430 & 0.326 & 134.76 \\
+      2D & 25 & 0.446 & 0.336 & 336.84 \\
+      2.5D & 1  & \textbf{0.537} & \textbf{0.435} & 13.67 \\
+      2.5D & 5  & 0.534 & 0.432 & 67.40 \\
+      2.5D & 10 & 0.516 & 0.416 & 134.70 \\
+      2.5D & 25 & 0.518 & 0.416 & 336.77 \\
+      \bottomrule
+    \end{tabular}
+  \end{block}
+  \begin{alertblock}{结论}
+    2.5D 输入显著提升 Dice；采样步数并非越多越好。1 步和 5 步结果接近，25 步推理时间约为 1 步的 25 倍，但没有继续提升。
   \end{alertblock}
 \end{frame}
 
+\begin{frame}{定性结果：稳定结构与失败模式}
+  \centering
+  \includegraphics[width=0.92\textwidth]{assets/axial_diffusion_case_success.png}
+  \sourcefoot{稳定样例：肾脏区域生成较完整，tumor 区域与标注有较高重叠。}
+  \vspace{0.6em}
+  \includegraphics[width=0.92\textwidth]{assets/axial_diffusion_case_failure.png}
+  \sourcefoot{失败样例：小结构漏检或类别混淆，主要对应 cyst 和小肿瘤 Dice 较低。}
+\end{frame}
+
 \begin{frame}{生成过程与不确定性}
-  \begin{columns}[T]
-    \column{0.50\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/axial_diffusion_denoising.png}
-      \sourcefoot{去噪轨迹：由 noisy mask 逐步得到 clean mask。}
-    \column{0.46\textwidth}
-      \centering
-      \includegraphics[width=\textwidth]{assets/axial_diffusion_uncertainty.png}
-      \sourcefoot{不确定性图：由重复采样的预测熵得到。}
-  \end{columns}
-  \begin{exampleblock}{生成式模型的额外价值}
-    与判别式模型相比，扩散模型可以展示生成过程，并通过重复采样给出边界和小病灶附近的不确定性提示。
+  \centering
+  \includegraphics[width=0.52\textwidth]{assets/axial_diffusion_uncertainty.png}
+  \sourcefoot{不确定性图：由 $K=8$ 次重复采样的归一化预测熵得到。}
+  \begin{exampleblock}{不确定性量化：前景切片子集，128 张，5 步采样}
+    \centering
+    \scriptsize
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{lrrrr}
+      \toprule
+      Dice & Error & Top 10\% entropy error & Error entropy & Correct entropy \\
+      \midrule
+      0.688 & 0.54\% & 3.15\% & 0.938 & 0.915 \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.25em}
+    \footnotesize
+    高熵区域错误率约为整体像素错误率的 $5.8\times$；预测熵能一定程度定位不稳定区域。
   \end{exampleblock}
 \end{frame}
 
@@ -471,7 +534,7 @@
         \begin{itemize}
           \item 2D x0 diffusion 的 Mean Dice 为 0.434，明显优于 cVAE 的 0.201；
           \item 2.5D x0 diffusion 进一步提升到 0.534，说明相邻切片上下文对生成式模型有效；
-          \item 判别式模型仍然更强，2.5D U-Net 达到 0.623；
+          \item 判别式模型仍然更强，2.5D U-Net 达到 0.623；SegResNet 2.5D 已测试但未提升；
           \item 生成式模型的优势主要体现在生成过程和不确定性表达。
         \end{itemize}
       \end{alertblock}

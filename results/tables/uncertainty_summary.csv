@@ -1,0 +1,2 @@
+experiment,sample_steps,uncertainty_samples,num_images,mean_dice,mean_entropy,mean_vote_disagreement,error_rate,top10_entropy_error_rate,error_entropy,correct_entropy,foreground_entropy,background_entropy
+diffusion_axial_25d_x0_multiclass,5,8,128,0.68777996301651,0.9153197323903441,0.0029427707195281982,0.005432724952697754,0.0315337224383917,0.9382537112891958,0.9151944673198962,0.924156362037211,0.9150028231560204
